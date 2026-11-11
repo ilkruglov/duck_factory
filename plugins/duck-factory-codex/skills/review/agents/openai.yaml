@@ -1,0 +1,4 @@
+interface:
+  display_name: "Review"
+  short_description: "One code review with measured depth"
+  default_prompt: "Use $review on the uncommitted changes."

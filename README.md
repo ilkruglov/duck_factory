@@ -1,6 +1,7 @@
 # duck_factory
 
-A Claude Code plugin (`duck-factory`).
+A plugin for Claude Code and for Codex CLI (`duck-factory`). The sections below describe the Claude Code
+version; [Codex](#codex) lists what differs.
 
 Three skills that make a small development pipeline for Claude Code: agree on the task before code, review
 the result once with a depth that fits the change, and hand the work over to a fresh session.
@@ -223,6 +224,54 @@ Rollback: the work started from commit adb43c6; `git checkout -- store.py tests/
 The first paragraph matters most: the file goes stale as soon as anything changes between sessions, and it can
 be wrong itself. In a test where the fix was reverted behind its back, the next session opened with "the
 handoff differs from the repository" and asked before doing anything.
+
+## Codex
+
+The same pipeline for Codex CLI lives in `plugins/duck-factory-codex` and works entirely inside Codex.
+
+```bash
+codex plugin marketplace add ilkruglov/duck_factory
+codex plugin add duck-factory@duck-factory
+```
+
+What differs from the Claude Code version:
+
+| | Claude Code | Codex |
+|---|---|---|
+| Who reviews | the built-in `/code-review` and Codex, two models | sub-agents of the same model, started with a fresh context (`fork_turns="none"`) |
+| light | `low` + Codex | one general pass |
+| normal | `medium` + Codex + plan check | one general pass + plan check |
+| enhanced | `high` + adversarial Codex + plan check | one adversarial pass instead of the general one + plan check |
+| Questions in `grill` | the question dialog, up to 4 per round | `request_user_input` when the session has it (up to 3 per round), else text |
+| Domain skills in `grill` | loaded with the Skill tool | their `SKILL.md` is read |
+| Plan check in `grill` | Codex, read-only | a sub-agent with a fresh context |
+| Simplification after fixes | `/simplify` | a step inside the skill |
+| `handoff` is manual through | `disable-model-invocation` | `agents/openai.yaml`, `allow_implicit_invocation: false` |
+
+Why one pass and not two in the enhanced tier. On two benchmarks (three seeded bugs in a 581-line diff, four
+seeded bugs of other kinds in a 4-line diff) the adversarial brief found exactly the bugs the general brief
+found, in every run, and took 2 to 2.5 times longer. What it adds is a reproduction for each finding and the
+gaps in the tests, which is what a change that cannot be reverted needs. A second pass by the same model did
+not find bugs the first one missed.
+
+The honest limit: there is no second model here. On the larger benchmark both Codex briefs missed two real
+problems that the `high` level of the other model had found. If you have both tools, the Claude Code version
+gives the stronger review.
+
+From runs on the same three benchmark diffs: a light review took about 2 minutes, a normal one about 2.5, and
+every seeded bug was found without changing the tree.
+
+Lines for your `AGENTS.md`, so the skills run by themselves:
+
+```markdown
+- A non-trivial task (a new feature or module, a choice between approaches, a change in several places, an
+  unclear goal): first the `grill` skill, then code.
+- After your own finished code change, before the report and a commit: the `review` skill, once. When you were
+  started as the reviewer of someone else's diff, the skill is not needed: just review.
+```
+
+The second sentence matters when another tool calls Codex as a reviewer: without it a plain review request could
+start the whole skill.
 
 ## Requirements
 

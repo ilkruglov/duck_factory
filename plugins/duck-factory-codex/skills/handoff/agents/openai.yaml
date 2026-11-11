@@ -1,0 +1,6 @@
+interface:
+  display_name: "Handoff"
+  short_description: "Write a file a fresh session can continue from"
+  default_prompt: "Use $handoff so a new session can continue."
+policy:
+  allow_implicit_invocation: false

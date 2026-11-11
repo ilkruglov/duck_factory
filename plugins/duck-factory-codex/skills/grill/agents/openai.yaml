@@ -1,0 +1,4 @@
+interface:
+  display_name: "Grill"
+  short_description: "Clarify a task and write a one-page plan"
+  default_prompt: "Use $grill to plan this change before any code."

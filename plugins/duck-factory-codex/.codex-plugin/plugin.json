@@ -1,0 +1,27 @@
+{
+  "name": "duck-factory",
+  "version": "0.1.0",
+  "description": "Three skills for a development pipeline in Codex: grill (clarify and plan before code), review (one code review with measured depth, by sub-agents), handoff (continue the work in a fresh session).",
+  "author": {
+    "name": "ilkruglov",
+    "url": "https://github.com/ilkruglov"
+  },
+  "homepage": "https://github.com/ilkruglov/duck_factory",
+  "repository": "https://github.com/ilkruglov/duck_factory",
+  "license": "MIT",
+  "keywords": ["workflow", "planning", "code-review", "handoff", "agent-skills"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "duck-factory",
+    "shortDescription": "Plan before code, review once, hand work over",
+    "longDescription": "grill interviews you until the decisions are settled and writes a one-page plan. review measures a finished change, picks its depth, runs the checks in sub-agents with a fresh context, verifies every finding and reports without editing. handoff writes a file a fresh session can continue from.",
+    "developerName": "ilkruglov",
+    "category": "Productivity",
+    "capabilities": [],
+    "defaultPrompt": [
+      "Use $grill to plan this change before any code.",
+      "Use $review on the uncommitted changes.",
+      "Use $handoff so a new session can continue."
+    ]
+  }
+}

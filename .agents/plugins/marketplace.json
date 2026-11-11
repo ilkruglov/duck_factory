@@ -1,0 +1,20 @@
+{
+  "name": "duck-factory",
+  "interface": {
+    "displayName": "duck-factory"
+  },
+  "plugins": [
+    {
+      "name": "duck-factory",
+      "source": {
+        "source": "local",
+        "path": "./plugins/duck-factory-codex"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}
