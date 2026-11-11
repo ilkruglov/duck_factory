@@ -1,0 +1,17 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "duck-factory",
+  "description": "A small development pipeline for Claude Code: clarify and plan before code, review once with measured depth, hand work over between sessions.",
+  "owner": {
+    "name": "ilkruglov"
+  },
+  "plugins": [
+    {
+      "name": "duck-factory",
+      "source": "./plugins/duck-factory",
+      "description": "Three skills for a development pipeline: grill (clarify and plan), review (one code review with measured depth), handoff (continue in a fresh session).",
+      "version": "0.1.0",
+      "category": "development"
+    }
+  ]
+}

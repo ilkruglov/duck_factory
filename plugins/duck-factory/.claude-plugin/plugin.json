@@ -1,0 +1,12 @@
+{
+  "name": "duck-factory",
+  "version": "0.1.0",
+  "description": "Three skills for a development pipeline: grill (clarify and plan before code), review (one code review with measured depth), handoff (continue the work in a fresh session).",
+  "author": {
+    "name": "ilkruglov"
+  },
+  "homepage": "https://github.com/ilkruglov/duck_factory",
+  "repository": "https://github.com/ilkruglov/duck_factory",
+  "license": "MIT",
+  "keywords": ["workflow", "planning", "code-review", "handoff", "skills"]
+}
