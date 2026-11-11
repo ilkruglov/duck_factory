@@ -18,6 +18,16 @@ You may have started this on your own. If the task is already clear - goal, what
 the result are all known - say so in one line and skip the interview; write the plan only if the change is large.
 If only one thing is unclear, ask that one question instead of a full interview.
 
+## Load the skills for the area
+
+Before the first question, look through the skills available in this session. If the task touches an area one of
+them covers - the framework or service in use, the kind of system being designed, the project's own design or
+domain rules - call the Skill tool for it now, before the interview. Several areas mean several skills.
+
+A domain skill changes which questions are worth asking and what the plan must contain, so loading it after the
+plan is written is too late. Name the skills you loaded in the plan. If none fits, go on without one; do not load
+a skill only because its name looks close.
+
 ## The interview
 
 Map the task as a **design tree**: every decision branches into the decisions that hang off it. Ask only about
@@ -64,6 +74,8 @@ with these sections:
 # <task>
 
 Goal: <one or two sentences: what changes for the user>
+
+Skills used: <domain skills loaded for this task, or "none">
 
 Decisions:
 - <each decision from the interview, with the reason in a few words>
