@@ -150,4 +150,4 @@ user's explicit go-ahead for this plan.
   and its result, what you are showing the user to look at, or "not checked" with the reason.
 - When the user has accepted the result, change the plan's `Status: active` to `Status: done`; when the work is
   cancelled, to `Status: dropped`. The plugin's hook puts every active plan of the project back into
-  context after a compaction or a resume, so a plan left active keeps coming back.
+  context after a compaction and names it when a session starts, so a plan left active keeps coming back.

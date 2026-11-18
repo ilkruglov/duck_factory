@@ -39,11 +39,23 @@ def test_every_codex_skill_has_ui_metadata_and_handoff_is_manual() -> None:
     assert "disable-model-invocation: true" in (CLAUDE / "handoff" / "SKILL.md").read_text()
 
 
-def test_repository_is_english_only() -> None:
+def test_repository_is_english_only_except_the_russian_readme() -> None:
     files = subprocess.run(["git", "ls-files"], cwd=ROOT, capture_output=True, text=True, check=True).stdout.split()
     for name in files:
         text = (ROOT / name).read_text(encoding="utf-8")
-        assert not re.search("[\u0400-\u04ff]", text), name
+        assert name == "README.ru.md" or not re.search("[\u0400-\u04ff]", text), name
+
+
+def test_the_russian_readme_has_the_sections_and_commands_of_the_english_one() -> None:
+    english = (ROOT / "README.md").read_text(encoding="utf-8")
+    russian = (ROOT / "README.ru.md").read_text(encoding="utf-8")
+    for level in ("## ", "### "):
+        count = [sum(line.startswith(level) for line in text.splitlines()) for text in (english, russian)]
+        assert count[0] == count[1], level
+    commands = [line for line in english.splitlines() if line.startswith(("claude plugin", "codex plugin", "python3 "))]
+    assert commands
+    for command in commands:
+        assert command.split("  #")[0].rstrip() in russian, command
 
 
 # --- the hooks around a compaction ---------------------------------------------------------------
@@ -126,7 +138,8 @@ def test_hook_closes_a_plan_only_after_the_user_accepted_the_result(tmp_path: Pa
 def test_in_a_new_session_the_hook_only_names_the_active_plan(tmp_path: Path) -> None:
     active = plan(tmp_path, "export.md", "active")
     plan(tmp_path, "old.md", "done")
-    for source in ("startup", "clear"):  # whatever starts a session that is not a continuation
+    # A resumed session still has its history, so the plan is not printed again: only a compaction loses it.
+    for source in ("startup", "resume", "clear"):
         shown = run_hook(tmp_path, source=source).stdout
         assert str(active) in shown
         assert "old.md" not in shown

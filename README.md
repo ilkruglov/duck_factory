@@ -1,7 +1,7 @@
 # duck_factory
 
 A plugin for Claude Code and for Codex CLI (`duck-factory`). The sections below describe the Claude Code
-version; [Codex](#codex) lists what differs.
+version; [Codex](#codex) lists what differs. In Russian: [README.ru.md](README.ru.md).
 
 Three skills that make a small development pipeline for Claude Code: agree on the task before starting, review
 the result once with a depth that fits the change, and hand the work over to a fresh session. Two
@@ -9,7 +9,7 @@ the result once with a depth that fits the change, and hand the work over to a f
 
 | Skill | When it runs | What it does |
 |---|---|---|
-| `grill` | by itself, before a non-trivial task, with or without code; or `/duck-factory:grill` | Asks first whether to do a task you did not state yourself, then interviews you in short rounds through the question dialog, recommended option first, and writes a one-page plan to `.tmp/plans/`. A large plan that changes code is checked by Codex before any code. |
+| `grill` | by itself, before a non-trivial task, with or without code; or `/duck-factory:grill` | When you approved a list wholesale or the task was the agent's idea, asks first which of it to do at all; then interviews you in short rounds through the question dialog, recommended option first, and writes a one-page plan to `.tmp/plans/`. A large plan that changes code is checked by Codex before any code. |
 | `review` | by itself, after a finished code change; or `/duck-factory:review` | Measures the change (code lines, files, call sites, reversibility), picks a tier, runs the built-in `/code-review` and Codex in parallel plus a check against the plan, verifies every finding, and reports. It only finds; fixes come after you agree. |
 | `handoff` | only on `/duck-factory:handoff` | Writes `.tmp/handoff/<slug>.md` so a fresh session can continue: goal, constraints, decisions, what is done and how it was checked, what is in flight, the next step, rollback. The file starts by telling the next session to check it against reality. |
 
@@ -164,7 +164,7 @@ Duplicates from different reviewers are merged, with the names of who found them
 ### The report
 
 ```text
-Review: light - 9 code lines, 1 file, 1 call site, reversible.
+Review: light - 9 code lines, 1 file, 1 call site, reversible. Decided by: up to 50 code lines, 1 file.
 
 Bugs
 1. The file limit counts names that are not watched, so watching can switch off for no reason.
@@ -261,8 +261,8 @@ files and writes none) on two events:
 | Event | What the script prints | Where it goes |
 |---|---|---|
 | `PreCompact` | a request to keep five things under their own headings (below), and the paths of the active plans | into the instructions for the compaction summary |
-| `SessionStart` after a compaction or a resume | every plan in `.tmp/plans/` with `Status: active`, in full (the newest three, up to 8000 characters; a longer one by path, with a request to read it) | into the context of the session |
-| `SessionStart` of a new session | one line per active plan: its path and when it was last changed | into the context of the session |
+| `SessionStart` after a compaction | every plan in `.tmp/plans/` with `Status: active`, in full (the newest three, up to 8000 characters; a longer one by path, with a request to read it) | into the context of the session |
+| `SessionStart` of a new or resumed session | one line per active plan: its path and when it was last changed | into the context of the session |
 
 What the summary is asked to keep, and why. In 24 compactions of one real project the agent went back to the
 session transcript 33 times afterwards; this is what it went for, plus what a summary blurs:
@@ -280,7 +280,11 @@ since the summary), the text of the plan (it comes back in full), project rules 
 - The plans are looked for in every `.tmp/plans/` from the session directory up to the repository root.
 - The first `Status:` line of a plan decides; a later one is taken for a quote.
 - With your own instructions in `/compact <instructions>` the `PreCompact` hook prints nothing.
-- A plan left `active` comes back after every compaction and resume: it is closed when you accept the result.
+- A plan left `active` comes back after every compaction and is named at every start: it is closed when you
+  accept the result.
+- A resumed session gets only the line, not the plan: its history is intact, and printing the plan on every
+  resume would add a copy each time. The hook's output goes to the end of the conversation, so the prompt cache
+  is not broken: with and without it a resume read the same 15,080 tokens from the cache.
 - If the project has compaction hooks of its own, these run next to them, not instead.
 - Checked in a live session: after `/compact` the summary had the extra headings after the standard ones, and
   the model named the plan's path and a marker word from it without reading any file.
@@ -325,6 +329,9 @@ gives the stronger review.
 
 From runs on the same three benchmark diffs: a light review took about 2 minutes, a normal one about 2.5, and
 every seeded bug was found without changing the tree.
+
+To update, install it again: `codex plugin remove duck-factory@duck-factory`, then `codex plugin add
+duck-factory@duck-factory`.
 
 Lines for your `AGENTS.md`, so the skills run by themselves:
 
@@ -375,7 +382,8 @@ The skills are plain Markdown; after an edit bump the version and reinstall, or 
 
 ## Evals
 
-`evals/bench.py` builds a small synthetic project (a notes keeper) and runs the skills on it in either harness:
+`evals/bench.py` builds a small synthetic project (a notes keeper) and runs the skills on it in either harness
+(Linux or macOS: a run that times out is stopped as a process group):
 
 ```bash
 python3 evals/bench.py list

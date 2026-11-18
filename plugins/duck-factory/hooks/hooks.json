@@ -1,5 +1,5 @@
 {
-  "description": "Keeps the project's active plan and the state of the work through a compaction, a resume and a new session.",
+  "description": "Keeps the state of the work through a compaction, brings the active plan back after it, and names the plan when a session starts.",
   "hooks": {
     "PreCompact": [
       {

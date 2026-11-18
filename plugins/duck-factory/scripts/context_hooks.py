@@ -5,9 +5,10 @@ accepted the result or the work is dropped.
 
 - PreCompact: what the script prints becomes instructions for the summary. It asks to keep what real sessions
   went back to the transcript for after a compaction, and names the active plans.
-- SessionStart after a compaction or a resume: what it prints is added to the context. It prints the active
-  plans themselves.
-- SessionStart of a new session: it only names the active plans, because the session may be about something else.
+- SessionStart after a compaction: what it prints is added to the context. It prints the active plans
+  themselves, because the compaction is what loses them.
+- Any other SessionStart (a new session, a resume): it only names the active plans. A new session may be about
+  something else, and a resumed one still has its history: printing the plan on every resume would add a copy.
 
 The script only reads files and never fails the session: on any problem it prints nothing.
 """
@@ -117,8 +118,8 @@ def main() -> None:
         if kind == "PreCompact":
             sys.stdout.write(for_summary(plans))
         elif plans:
-            # The work goes on after a compaction or a resume; any other start may be about something else.
-            sys.stdout.write(in_full(plans) if source in ("compact", "resume") else by_name(plans))
+            # Only a compaction loses the plan; a resumed session still has it, a new one may not need it.
+            sys.stdout.write(in_full(plans) if source == "compact" else by_name(plans))
     except Exception:  # noqa: BLE001 - a reminder must never break a compaction or the start of a session
         return
 
