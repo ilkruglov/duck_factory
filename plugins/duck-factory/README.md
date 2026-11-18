@@ -1,7 +1,10 @@
 # duck-factory
 
 Three skills for a small development pipeline in Claude Code: `grill` (clarify and plan before code), `review`
-(one code review with measured depth) and `handoff` (continue the work in a fresh session).
+(one code review with measured depth) and `handoff` (continue the work in a fresh session). Two hooks bring the
+active plan back after a context compaction and ask the summary to keep the state of the work.
+
+Install: `/plugin install duck-factory --marketplace ilkruglov/duck_factory`
 
 Full documentation: https://github.com/ilkruglov/duck_factory#readme
 

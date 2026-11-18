@@ -1,6 +1,6 @@
 ---
 name: review
-description: Use after finishing a code change, before the report and before a commit - the one code review to run. Picks its own depth from measured size, blast radius and reversibility, runs the built-in /code-review and Codex in parallel plus a check against the plan, verifies each finding, and reports. Also for "review this", "check with Codex", a second opinion on a diff. It only finds - fixes come after the user agrees. Not for changes to docs, configs or comments only.
+description: Use after finishing a code change, before the report and before a commit - the one code review to run. Picks its own depth from measured size, blast radius and reversibility, runs the built-in /code-review and Codex in parallel plus a check against the plan, verifies each finding, and reports. Also for "review this", "check with Codex", a second opinion on a diff. It only finds - fixes come after the user agrees. Not for changes to docs or comments only; a data or config file that the project's code reads counts as code.
 argument-hint: "[enhanced | max] [path to the plan]"
 ---
 
@@ -19,11 +19,18 @@ The change is everything uncommitted: modified, staged and new files. Measure, d
 ```bash
 git status --short
 git diff HEAD --numstat                 # tracked files: added, deleted, path
+git diff HEAD -w --numstat              # the same without lines that only changed their indentation
 git ls-files -o --exclude-standard      # new files; count lines of the ones that belong to this change
 ```
 
 - **Code lines**: added plus deleted, without tests (`tests/`, `test_*`, `*_test.*`, `*.spec.*`), docs (`*.md`,
-  `docs/`) and data or config files (`*.json`, `*.yaml`, `*.toml`, `*.lock`).
+  `docs/`) and data or config files (`*.json`, `*.yaml`, `*.toml`, `*.csv`, `*.lock`). Take the count
+  from the `-w` run, so that wrapping a block in an `if` is two lines and not the whole block. A file that shows
+  changes in the plain run and none with `-w` is counted from the plain run: where indentation is syntax (Python,
+  YAML) a shifted line changes behaviour, and such a change must not come out as "no code lines".
+- **Data the code reads is code.** A data or config file that the project's code, tests or checks load - a table
+  the pipeline reads, a fixture, a schema, a prompt - counts line for line, and its bugs are bugs: a wrong value
+  there breaks the program like a wrong line of code. `git grep -n <file name>` shows whether anything reads it.
 - **Files**: code files changed.
 - **Call sites**: for each function, method or class whose behaviour or signature changed, the places that use
   it (LSP find-references; else `git grep -nw <name>`), summed. Count uses in code only, not in tests and not
@@ -31,21 +38,29 @@ git ls-files -o --exclude-standard      # new files; count lines of the ones tha
 - **One-way door**: the change does something that cannot simply be reverted - a data migration, deleting
   data or files, a release or publication, an external API or webhook contract, the format of files already on
   disk.
+- **Critical paths**: the paths the project names under a `Critical paths` heading in its `CLAUDE.md`, one
+  path or glob per line. A change that touches one of them is reviewed at the enhanced tier. No such list:
+  nothing is critical, and you do not make one up from how important the code looks.
 
 | Tier | When | Built-in | Codex | Plan check |
 |---|---|---|---|---|
 | none | no code lines at all | - | - | - |
 | light | up to 50 code lines, 1 file, up to 5 call sites, no one-way door | `low` | review | no |
 | normal | everything else | `medium` | review | yes |
-| enhanced | a one-way door, or over 10 files, or over 20 call sites, or the user asked | `high` | adversarial, with a focus | yes |
+| enhanced | a one-way door, or a critical path, or over 10 files, or over 20 call sites, or the user asked | `high` | adversarial, with a focus | yes |
 | repeat | after fixes from the previous round | as light, aimed (see step 5) | review | no |
 
 A one-way door outweighs every other sign. In doubt between two tiers, take the higher. `max` only when the user
 asks for it by name.
 
-Before starting, say the choice in one line, with the numbers. The same line is the first line of the final
-report, before any heading:
-`Review: normal - 132 code lines, 3 files, 7 call sites, reversible.`
+The tier comes from this table and from nothing else. A reason the table does not hold - the code "is the core
+of the system", the change "feels risky" - does not move the tier. If you think the table is wrong for this
+change, say so in one line after the tier line and let the user decide. "In doubt" is doubt about a measurement
+(is this a one-way door?), not about importance.
+
+Before starting, say the choice in one line: the numbers, then the row of the table that decided it. The same
+line is the first line of the final report, before any heading:
+`Review: normal - 132 code lines, 3 files, 7 call sites, reversible. Decided by: over 50 code lines.`
 
 For tier "none" say so in one line and stop.
 
@@ -135,8 +150,17 @@ In this order:
 If two rounds in a row find only edge cases in the same place, stop and ask the user: simplify the approach or
 accept the limits. Do not fix in circles.
 
+Ask it in plain words, for someone who has not read the diff and does not know the review's terms. First what
+keeps going wrong, in one sentence with an example of an input. Then the options, and for each one what they get
+and what they lose: which behaviour goes away and what stops breaking if the approach is simplified; which
+inputs will keep failing, listed, if it stays as it is. The same goes for every other question this skill asks.
+
 ## Rules
 
 - During the review change nothing but files in `.tmp/`.
+- The tools you run write into the project too: `uv run` leaves `uv.lock` and `.venv`, a test run leaves caches.
+  Before the report compare `git status --short` with the one from step 1, remove what the review itself created
+  outside `.tmp/`, and name it in the report. Leave alone everything that was there before.
 - Commit and push only on the user's command; a clean review is not that command.
-- Do not lower the tier to save time, and do not raise it to `max` on your own.
+- Do not lower the tier to save time, do not raise it for a reason the table does not hold, and never go to
+  `max` on your own.

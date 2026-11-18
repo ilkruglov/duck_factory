@@ -1,0 +1,28 @@
+{
+  "description": "Keeps the project's active plan and the state of the work through a compaction, a resume and a new session.",
+  "hooks": {
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -I \"${CLAUDE_PLUGIN_ROOT}/scripts/context_hooks.py\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -I \"${CLAUDE_PLUGIN_ROOT}/scripts/context_hooks.py\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -3,12 +3,13 @@
 A plugin for Claude Code and for Codex CLI (`duck-factory`). The sections below describe the Claude Code
 version; [Codex](#codex) lists what differs.
 
-Three skills that make a small development pipeline for Claude Code: agree on the task before code, review
-the result once with a depth that fits the change, and hand the work over to a fresh session.
+Three skills that make a small development pipeline for Claude Code: agree on the task before starting, review
+the result once with a depth that fits the change, and hand the work over to a fresh session. Two
+[hooks](#hooks) keep the plan and the state of the work through a context compaction.
 
 | Skill | When it runs | What it does |
 |---|---|---|
-| `grill` | by itself, before a non-trivial change; or `/duck-factory:grill` | Interviews you in short rounds through the question dialog, recommended option first, then writes a one-page plan to `.tmp/plans/`. For large tasks the plan is checked by Codex before any code. |
+| `grill` | by itself, before a non-trivial task, with or without code; or `/duck-factory:grill` | Asks first whether to do a task you did not state yourself, then interviews you in short rounds through the question dialog, recommended option first, and writes a one-page plan to `.tmp/plans/`. A large plan that changes code is checked by Codex before any code. |
 | `review` | by itself, after a finished code change; or `/duck-factory:review` | Measures the change (code lines, files, call sites, reversibility), picks a tier, runs the built-in `/code-review` and Codex in parallel plus a check against the plan, verifies every finding, and reports. It only finds; fixes come after you agree. |
 | `handoff` | only on `/duck-factory:handoff` | Writes `.tmp/handoff/<slug>.md` so a fresh session can continue: goal, constraints, decisions, what is done and how it was checked, what is in flight, the next step, rollback. The file starts by telling the next session to check it against reality. |
 
@@ -21,16 +22,21 @@ the result once with a depth that fits the change, and hand the work over to a f
    aimed at the fixed places.
 5. `handoff` when the work continues in another session.
 
-Nothing here replaces your approval: `grill` changes nothing until you confirm, the plan is not consent to edit
-code, and `review` never edits files.
+Nothing here replaces your approval: `grill` changes nothing until you confirm, the plan is not consent to start
+the work, and `review` never edits files.
 
 ## grill
 
-Runs before code when the task is not trivial: a new feature or module, a choice between approaches, a change in
-several places, an unclear goal. For a bug fix or a small clear edit it says the task is clear and steps aside.
+Runs before a task that is not trivial: a new feature or module, a choice between approaches, a change in
+several places, work without code that takes more than a few steps (research, a document, a setup), an unclear
+goal. For a bug fix or a small clear edit it says the task is clear and steps aside.
 
 How a session goes:
 
+0. **What to do, before how.** When you approved a set of tasks wholesale ("do everything" about a backlog, a
+   list of suggestions, someone else's plan), or the task was the agent's own idea, the first round asks only
+   which of it to do at all, with the size of each task. Design questions come after you have said to do a task.
+   Tasks you named yourself in the request are not asked about.
 1. **Skills for the area.** If the task touches something another installed skill covers (a framework, a kind
    of system, the project's design rules), that skill is loaded first: it changes which questions are worth
    asking.
@@ -43,6 +49,10 @@ How a session goes:
 
 ```markdown
 # Export notes
+
+Status: active
+
+Source: "add export of the notes to CSV and JSON, the format chosen on the command line"
 
 Goal: `notes export --format csv|json` prints all notes to stdout.
 
@@ -57,19 +67,24 @@ Taken by default, not asked:
 
 Not touching: the storage format, the add and list commands.
 
-Acceptance criteria (each checked by a test or a command):
+Acceptance criteria (each checked by a test, by a command, or by the user looking at a named result):
 - `notes export --format csv` prints a header and one row per note - tests/test_cli.py::test_export_csv
 - An unknown format exits with an argparse error - tests/test_cli.py::test_export_bad_format
 
 Risks and open questions: none
 ```
 
-For a large task (a new module, an approach that is costly to reverse, more than a session of work) the plan is
-then checked by Codex against the repository, read-only. Its findings that are decisions come back to you as
-questions.
+`Status` is `active` until you accept the result (`done`) or cancel the work (`dropped`); the line stays in
+English whatever the language of the plan, because the [hooks](#hooks) read it. `Source` quotes your words that
+ask for the task. A criterion only a person can judge - how a text reads, whether a setup is convenient - is
+checked by showing you a named result.
 
-While working by the plan, the skill re-reads the file after a context compaction or in a new session, does not
-change a decision silently, and ends the report by going through the acceptance criteria one by one.
+For a large task that changes code (a new module, an approach that is costly to reverse, more than a session of
+work) the plan is then checked by Codex against the repository, read-only. Its findings that are decisions come
+back to you as questions. A plan with no code in it is not sent to Codex.
+
+While working by the plan, the skill does not change a decision silently, redoes without asking what plainly
+does not do what the agreed plan says, and ends the report by going through the acceptance criteria one by one.
 
 ## review
 
@@ -80,24 +95,32 @@ plan, and can each finding be proved.
 
 The skill measures everything uncommitted (modified, staged and new files) and prints the result in one line:
 
-`Review: normal - 132 code lines, 3 files, 7 call sites, reversible.`
+`Review: normal - 132 code lines, 3 files, 7 call sites, reversible. Decided by: over 50 code lines.`
 
-- **Code lines**: added plus deleted, without tests, docs and data or config files.
+- **Code lines**: added plus deleted, without tests, docs and data or config files. Lines that only changed
+  their indentation are not counted (`git diff -w`): wrapping a block in an `if` is two lines, not the block.
+  A file whose whole change is indentation is counted in full: in Python or YAML a shifted line changes behaviour.
+- **Data the code reads is code**: a table, fixture, schema or prompt that the project's code, tests or checks
+  load counts line for line. A wrong value there breaks the program like a wrong line of code.
 - **Files**: code files changed.
 - **Call sites**: places in code (not tests) that use a function, method or class whose behaviour or signature
   changed.
 - **One-way door**: something that cannot simply be reverted - a data migration, deleting data or files, a
   release, an external API contract, the format of files already on disk.
+- **Critical paths**: the paths you list under a `Critical paths` heading in the project's `CLAUDE.md`, one path
+  or glob per line. A change that touches one goes to the enhanced tier. Without the list nothing is critical.
 
 | Tier | When | Built-in review | Codex | Plan check |
 |---|---|---|---|---|
 | none | no code lines changed | - | - | - |
 | light | up to 50 code lines, 1 file, up to 5 call sites, reversible | `low` | review | no |
 | normal | everything else | `medium` | review | yes |
-| enhanced | a one-way door, over 10 files, over 20 call sites, or you asked | `high` | adversarial, with a focus | yes |
+| enhanced | a one-way door, a critical path, over 10 files, over 20 call sites, or you asked | `high` | adversarial, with a focus | yes |
 | repeat | after fixes | as light, aimed at the fixes | review | no |
 
-A one-way door outweighs the other signs; in doubt the higher tier wins; `max` only when you ask for it by name.
+A one-way door outweighs the other signs; `max` only when you ask for it by name. The tier comes from the table
+and nothing else: "this is the core of the system" does not raise it - that is what the list of critical paths
+is for. When a measurement is in doubt (is this a one-way door?), the higher tier wins.
 
 Why these tiers. They come from a measurement on three diffs with seeded bugs (9, 16 and 581 lines, one run per
 cell):
@@ -164,12 +187,17 @@ Fix the confirmed bug and run /simplify?
 
 A finding that is a decision rather than a bug goes to you as its own question, not into the fix list.
 
+The review changes nothing but files in `.tmp/`. The tools it runs can still leave files behind (`uv run`
+writes `uv.lock`), so before the report it compares `git status` with the one it started from, removes what it
+created itself and says so.
+
 ### After you agree
 
 A failing test, the fix and a test run for each confirmed bug; then `/simplify`; then the project's tests; then
 a repeat review of the whole change at the light tier, aimed at the functions and files just fixed. Findings the
 previous round already reported are dropped. If two rounds in a row find only edge cases in the same place, the
-skill stops and asks you whether to simplify the approach or accept the limits.
+skill stops and asks you whether to simplify the approach or accept the limits - in plain words: what keeps going
+wrong, with an example, and for each option what you get and what you lose.
 
 ### Without Codex
 
@@ -225,6 +253,41 @@ The first paragraph matters most: the file goes stale as soon as anything change
 be wrong itself. In a test where the fix was reverted behind its back, the next session opened with "the
 handoff differs from the repository" and asked before doing anything.
 
+## Hooks
+
+The Claude Code plugin carries one small script (`scripts/context_hooks.py`, Python standard library only, reads
+files and writes none) on two events:
+
+| Event | What the script prints | Where it goes |
+|---|---|---|
+| `PreCompact` | a request to keep five things under their own headings (below), and the paths of the active plans | into the instructions for the compaction summary |
+| `SessionStart` after a compaction or a resume | every plan in `.tmp/plans/` with `Status: active`, in full (the newest three, up to 8000 characters; a longer one by path, with a request to read it) | into the context of the session |
+| `SessionStart` of a new session | one line per active plan: its path and when it was last changed | into the context of the session |
+
+What the summary is asked to keep, and why. In 24 compactions of one real project the agent went back to the
+session transcript 33 times afterwards; this is what it went for, plus what a summary blurs:
+
+- **Exact commands** that produced results still in use or started what is still running. The usual summary
+  says what was done, not how: the most frequent thing looked up.
+- **Long materials**: texts you pasted, reports of sub-agents, long tool outputs - where each one is.
+- **Done, not checked**, and how far a long pass has got: after a compaction "did" and "verified" merge.
+- **Waiting on the user**: what you have and have not agreed to. "Next: do X" reads as a permission.
+- **Standing corrections**: what you said about how to work, as rules, with the number of repeats.
+
+Not asked for, on purpose: the state of the disk (git can be asked again, and nothing has changed in the seconds
+since the summary), the text of the plan (it comes back in full), project rules (reloaded by Claude Code).
+
+- The plans are looked for in every `.tmp/plans/` from the session directory up to the repository root.
+- The first `Status:` line of a plan decides; a later one is taken for a quote.
+- With your own instructions in `/compact <instructions>` the `PreCompact` hook prints nothing.
+- A plan left `active` comes back after every compaction and resume: it is closed when you accept the result.
+- If the project has compaction hooks of its own, these run next to them, not instead.
+- Checked in a live session: after `/compact` the summary had the extra headings after the standard ones, and
+  the model named the plan's path and a marker word from it without reading any file.
+- Not measured: whether the extra headings make the work after a compaction better. A repeated correction is
+  not cured by keeping its text: in the same project one was in the summary 8 times out of 9 and had to be said
+  again anyway.
+
 ## Codex
 
 The same pipeline for Codex CLI lives in `plugins/duck-factory-codex` and works entirely inside Codex.
@@ -247,6 +310,8 @@ What differs from the Claude Code version:
 | Plan check in `grill` | Codex, read-only | a sub-agent with a fresh context |
 | Simplification after fixes | `/simplify` | a step inside the skill |
 | `handoff` is manual through | `disable-model-invocation` | `agents/openai.yaml`, `allow_implicit_invocation: false` |
+| Critical paths are listed in | the project's `CLAUDE.md` | the project's `AGENTS.md` |
+| The plan after a compaction | brought back by the hooks | the skill's instruction to re-read the plan with `Status: active`; no hooks |
 
 Why one pass and not two in the enhanced tier. On two benchmarks (three seeded bugs in a 581-line diff, four
 seeded bugs of other kinds in a 4-line diff) the adversarial brief found exactly the bugs the general brief
@@ -279,6 +344,7 @@ start the whole skill.
 - For the second opinion and the plan check: the `codex@openai-codex` plugin, logged in. Without it `review`
   works with Claude only. The Codex model is pinned in the skills as `gpt-6-astra`; change it there if you use
   another one.
+- `python3` 3.9 or later on PATH: it runs the hooks.
 - Projects keep `.tmp/` in `.gitignore`: plans, handoff files and reproduction scripts go there.
 
 ## Install
@@ -303,8 +369,37 @@ The skills are plain Markdown; after an edit bump the version and reinstall, or 
 
 - **Tier thresholds**: the table in `skills/review/SKILL.md`, step 1.
 - **Codex model**: `gpt-6-astra` in `skills/review/SKILL.md` and `skills/grill/SKILL.md`.
-- **Where plans and handoff files go**: `.tmp/plans/` and `.tmp/handoff/` in the same two skills and in
-  `skills/handoff/SKILL.md`.
+- **Where plans and handoff files go**: `.tmp/plans/` and `.tmp/handoff/` in the same two skills, in
+  `skills/handoff/SKILL.md` and in `scripts/context_hooks.py`.
+- **Critical paths** of a project: a `Critical paths` heading in its `CLAUDE.md` (`AGENTS.md` for Codex).
+
+## Evals
+
+`evals/bench.py` builds a small synthetic project (a notes keeper) and runs the skills on it in either harness:
+
+```bash
+python3 evals/bench.py list
+python3 evals/bench.py review feature --harness claude                       # the installed plugin
+python3 evals/bench.py review data --harness claude --plugin-dir plugins/duck-factory   # a working copy
+python3 evals/bench.py grill inferred --harness codex
+```
+
+- **Review cases** are a repository with an uncommitted change that holds seeded bugs no test of the project
+  catches: `small` (one file, one bug, the light tier), `feature` (three code files, one of them new, three
+  bugs, the normal tier), `data` (only a CSV table that the code reads, two bugs). The summary prints the tier
+  line, which seeded lines the report cites, the time, and whether the working tree stayed untouched.
+- **Grill requests** are the ones that should start an interview, the ones that should not (a bug, a typo, a
+  question), a list with "do everything" (the first round must ask which of it to do at all), two tasks named
+  in the request (no such question) and a task with no code (a plan, but no review of it by another model).
+
+A seeded bug counts as found when the final message cites its line as `file:line`, which the skill's report
+has to do anyway; both harnesses are judged by the final message alone, not by the trace of commands and sources.
+It is still a hint: read the report. A run without a final message (the harness failed, timed out or answered
+nothing) is reported as failed, with the end of its error output, not as missed bugs. One run is one sample;
+repeat it before comparing two versions of a skill. Runs are kept in `.tmp/evals/`.
+
+The runs are not isolated from your own settings: a global `CLAUDE.md` or `AGENTS.md` that names the skills
+makes them start more readily than their descriptions alone would.
 
 ## Update and remove
 
@@ -319,9 +414,15 @@ A new version loads in the next Claude Code session.
 ## Limits
 
 - Tested on Linux with Claude Code and Opus-class models; the tier measurement used one repository and bugs of
-  one kind (path and environment selection logic).
+  one kind (path and environment selection logic). The numbers in this file come from those earlier benches, not
+  from the synthetic project in `evals/`.
+- The hooks need the plan to carry `Status: active`; a plan written by a version before 0.2.0 has no such line
+  and is not brought back until you add it.
 - In a headless run (`claude -p`) the question dialog is not available, and `grill` asks in text instead.
 - `review` verifies findings by reproducing them, so a light review takes about two minutes, not one.
+- `review` counts lines without indentation changes, so a change that mixes re-indented lines with real edits can
+  be counted smaller than it is and get the lighter tier. The reviewers still read the whole diff; only the depth
+  is chosen from the count.
 
 ## Credits
 

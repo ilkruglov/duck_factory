@@ -1,6 +1,6 @@
 ---
 name: grill
-description: Use BEFORE writing any code for a non-trivial change - a new feature or module, a choice between approaches, a change across several places, or any request whose goal, scope or acceptance check is unclear. Interviews the user in short rounds, recommended option first, until every decision is settled, then writes a one-page plan to .tmp/plans/. Not for bug fixes, small clear edits, or questions that only need an answer.
+description: Use BEFORE starting any non-trivial task - a new feature or module, a choice between approaches, a change across several places, work without code that takes more than a few steps (research, a document, a setup), or any request whose goal, scope or acceptance check is unclear. Interviews the user in short rounds, recommended option first, until every decision is settled, then writes a one-page plan to .tmp/plans/. Not for bug fixes, small clear edits, or questions that only need an answer.
 ---
 
 # Grill
@@ -11,11 +11,28 @@ Interview the user until you both understand the task the same way. Based on Mat
 Write everything the user reads in the user's language: questions, option labels and descriptions, summaries and
 the plan, its headings included. Only "(Recommended)" stays as is.
 
-## First: is it needed?
+## First: is it needed, and whose task is it?
 
 You may have started this on your own. If the task is already clear - goal, what not to touch and how to check
 the result are all known - say so in one line and skip the interview; write the plan only if the change is large.
 If only one thing is unclear, ask that one question instead of a full interview.
+
+**Settle what to do before how.** The first round asks only about scope - whether to do it at all, and for
+several tasks which of them - when either is true:
+
+- the user approved a set of tasks wholesale: "do everything", "all of it", "yes to all" about a backlog, a list
+  of your suggestions or someone else's plan;
+- the wording of the task is yours: you proposed it, or derived it from your own analysis.
+
+Tasks the user named one by one in the request itself ("add export and a search command") are settled: do not
+ask whether to do them.
+
+List the tasks in one question with the options all of them, only some (the user names them), none of them; with a
+long list, group the small ones. A single task gets the options do it, postpone it, drop it. For every task say
+what the user gets and roughly how much work it is - an hour, a day, a new subsystem - and which one you would
+postpone. No design question goes into that round, however consequential: how to build a task is asked only after
+the user has said to build it. Twenty questions about work nobody wanted is the most expensive mistake this skill
+makes.
 
 ## Load the skills for the area
 
@@ -72,6 +89,10 @@ with these sections:
 ```markdown
 # <task>
 
+Status: active
+
+Source: <the user's words that ask for this, quoted; for a task you proposed, the words that confirmed it>
+
 Goal: <one or two sentences: what changes for the user>
 
 Skills used: <domain skills read for this task, or "none">
@@ -84,13 +105,20 @@ Taken by default, not asked:
 
 Not touching: <what stays as it is>
 
-Acceptance criteria (each checked by a test or a command):
-- <criterion> - <how it is checked>
+Acceptance criteria (each checked by a test, by a command, or by the user looking at a named result):
+- <criterion> - <the test or command; or "the user looks at <what you will show them>">
 
 Risks and open questions: <if any>
 ```
 
+Write the `Status:` line in English, exactly as shown, whatever the language of the plan: it marks the plan to re-read after a compaction or in a new session.
+Its values are `active`, `done` and `dropped`. A criterion that only a person can judge - how a text reads, how a
+picture looks, whether a setup is convenient - is checked by showing it to the user: name what you will show.
+
 ### Review of the plan by a fresh reader
+
+This step applies only when the plan changes code in a repository. A plan with no code in it - research, a
+document, a setup - is not sent to a sub-agent, and the skipped review is not mentioned.
 
 For a large task - a new module, a choice between approaches that is costly to reverse, or work of more than a
 session - have the plan checked before any code. Skip it for smaller plans, and say that you skipped it.
@@ -106,12 +134,19 @@ Report its findings as it gave them and say which you checked and agree with. Do
 yourself: each finding that is a decision goes to the user as a question, and the plan is updated from the
 answers. A finding that is a fact you got wrong, correct in the plan and say so.
 
-Show the path and the plan. Until the user approves the plan, change no project files.
+Show the path and the plan. Until the user approves the plan, change no project files and start nothing the plan
+describes.
 
 ## Working by the plan
 
 - Before starting the work, and again after the context was compacted or in a new session, read the plan file:
-  it, not your memory of the interview, is the source of truth.
+  it, not your memory of the interview, is the source of truth. If you do not remember which plan is current, it
+  is the one in `.tmp/plans/` with `Status: active`.
 - A decision that turns out wrong during the work is not yours to change silently: stop, say what you found, ask.
+- A defect in work the user already agreed to is different: the result does not do what the plan says, and you
+  can see that yourself. Redo it without asking and say what was wrong and what you changed. Ask only when the fix
+  needs a decision the plan does not hold.
 - When the work is done, go through the acceptance criteria one by one in the report: the command or test you ran
-  and its result, or "not checked" with the reason.
+  and its result, what you are showing the user to look at, or "not checked" with the reason.
+- When the user has accepted the result, change the plan's `Status: active` to `Status: done`; when the work is
+  cancelled, to `Status: dropped`. A plan left active will be taken for current work in a later session.
