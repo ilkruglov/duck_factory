@@ -13,8 +13,8 @@ the plan, its headings included. Only "(Recommended)" stays as is.
 
 ## First: is it needed, and whose task is it?
 
-You may have started this on your own. If the task is already clear - goal, what not to touch and how to check
-the result are all known - say so in one line and skip the interview; write the plan only if the change is large.
+You may have started this on your own. If the task is already clear - goal, scope and how to check the
+result are all known - say so in one line and skip the interview; write the plan only if the change is large.
 If only one thing is unclear, ask that one question instead of a full interview.
 
 **Settle what to do before how.** The first round asks only about scope - whether to do it at all, and for
@@ -58,16 +58,24 @@ how a tool behaves. Look it up or measure it first.
 The **frontier** is every decision whose prerequisites are already settled; a question that depends on an answer
 you haven't heard yet waits for a later round. Ask the frontier in rounds, the most consequential first.
 
-**With the `request_user_input` tool** (when this session has it):
+**How to ask.** These questions are required, never optional: the interview exists because the decisions are the
+user's. Elapsed time is not an answer, no default is taken because nobody replied, and no work that depends on an
+open question is done. Codex gives different question tools in different modes; use the row for this session:
 
-- at most 3 questions per call, 2-3 options each; the user can always add their own answer;
-- put your recommendation first and end its label with "(Recommended)";
-- each question stands alone: put the one fact the choice hinges on into the question itself, in a sentence, with
-  its source if it is not obvious (`file:line`, a measurement).
+| Tool | When | Per call, and how the answers arrive |
+|---|---|---|
+| `request_user_input` | in Plan mode, the only mode that has it: Codex itself asks for it there | at most 3 questions, 2-3 options each; each question one sentence with a header of up to 12 characters, the fact it hinges on in the option descriptions; the call waits for the answers |
+| `request_user_input_async` | outside Plan mode, if the session has it | up to 4 questions, 2-4 options each; the call returns at once and the answers come in the user's next message |
+| `send_message_to_user_async` | outside Plan mode, when there is no `request_user_input_async` | up to 4 numbered questions in text; the answers come in the user's next message |
+| none, or the tool fails | | up to 4 numbered questions in the final message; say plainly that these are questions waiting for the user's answers, not decisions you made |
 
-**Without it** (the tool is missing or refused, as in a non-interactive run): ask in text by the same rules - at
-most 4 numbered questions, each with its options and the recommended one marked, the fact inside the question -
-and say plainly that these are questions waiting for the user's answers, not decisions you made.
+Outside Plan mode, whatever tool you use, end the turn with the open questions written out in your final message:
+that message is what the user always sees. A question tool not in this table follows its own description of how
+the answers arrive; the questions stay required.
+
+For every question: put your recommendation first and end its label with "(Recommended)"; the user can always add
+their own answer; put the one fact the choice hinges on into the question itself, in a sentence, with its source if
+it is not obvious (`file:line`, a measurement).
 
 **From the second round on**, the last question of the round is the way out: "keep asking" or "enough - take your
 recommendations for the rest", with roughly how many decisions are left. If the user picks "enough", settle the
@@ -103,7 +111,7 @@ Decisions:
 Taken by default, not asked:
 - <decision> - <why it was obvious, or "user chose to stop the questions">
 
-Not touching: <what stays as it is>
+Scope: <what the work covers: the parts of the project it changes and the deliverables>
 
 Acceptance criteria (each checked by a test, by a command, or by the user looking at a named result):
 - <criterion> - <the test or command; or "the user looks at <what you will show them>">
@@ -124,7 +132,8 @@ For a large task - a new module, a choice between approaches that is costly to r
 session - have the plan checked before any code. Skip it for smaller plans, and say that you skipped it.
 
 Spawn a sub-agent (`collaboration.spawn_agent`) with **`fork_turns="none"`**, so that it has not seen the
-interview and reads the plan as a stranger would, and give it this brief with the absolute paths filled in:
+interview and reads the plan as a stranger would, and give it this brief with the absolute paths filled in (in
+Plan mode, where the file is not written yet, put the plan's text into the brief in place of its path):
 
 > Review the plan in `<plan path>` against the repository at `<path>`. Do not change any files. Report only:
 > decisions that are wrong or contradict the code, missing decisions that would change the implementation, and
@@ -134,7 +143,8 @@ Report its findings as it gave them and say which you checked and agree with. Do
 yourself: each finding that is a decision goes to the user as a question, and the plan is updated from the
 answers. A finding that is a fact you got wrong, correct in the plan and say so.
 
-Show the path and the plan. Until the user approves the plan, change no project files and start nothing the plan
+Plan mode allows no edits: in Plan mode, give the plan in your final answer and write the file once the user has
+left Plan mode. Show the path and the plan. Until the user approves the plan, change no project files and start nothing the plan
 describes.
 
 ## Working by the plan

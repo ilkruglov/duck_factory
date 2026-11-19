@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -65,11 +66,18 @@ def test_seeds_are_found_in_a_report_that_cites_their_lines(tmp_path: Path) -> N
     assert bench.mentioned(bench.seed_lines(bench.CASES["data"][2], tmp_path / "data"), only_first) == [True, False]
 
 
+def test_seeds_cited_as_markdown_anchors_are_found() -> None:
+    report = "Duplicate alias: [Existing mapping](./notes/tags.csv#L2) and [Duplicate mapping](./notes/tags.csv#L7)."
+    assert bench.mentioned([{("notes/tags.csv", 6)}, {("notes/tags.csv", 7)}], report) == [False, True]
+    ranged = "Ids repeat after a remove ([store](notes/store.py#L21-L24)), see also notes/cli.py:L5."
+    assert bench.mentioned([{("notes/store.py", 23)}, {("notes/cli.py", 5)}], ranged) == [True, True]
+
+
 def test_the_tier_line_is_recognised_as_the_review_skill_writes_it() -> None:
     for skills in ("duck-factory", "duck-factory-codex"):
         text = (ROOT / "plugins" / skills / "skills" / "review" / "SKILL.md").read_text(encoding="utf-8")
         example = next(line for line in text.splitlines() if line.startswith("`Review:"))
-        assert bench.TIER.search(example), skills
+        assert bench.tier_line(example.strip("`")), skills
 
 
 def test_both_harnesses_are_judged_by_the_final_message_not_by_the_trace(tmp_path: Path) -> None:
@@ -152,4 +160,74 @@ def test_a_run_reports_a_skill_that_broke_the_tree_instead_of_crashing_on_it(
         assert bench.run("review", "small", "claude", None, 60, None) is True, damage
         shown = capsys.readouterr().out
         assert "cited" in shown, damage  # the seeded line is known from before the run
-        assert "working tree untouched: NO" in shown, damage
+        assert "working tree untouched (outside .tmp/): NO" in shown, damage
+
+
+def test_a_commit_made_by_the_agent_changes_the_snapshot(tmp_path: Path) -> None:
+    bench.build(None, tmp_path / "p")
+    before = bench.snapshot(tmp_path / "p")
+    (tmp_path / "p" / "notes" / "store.py").write_text("changed\n", encoding="utf-8")
+    bench.git(tmp_path / "p", "-c", "user.name=a", "-c", "user.email=a@a", "commit", "-qam", "agent")
+    assert bench.snapshot(tmp_path / "p") != before
+
+
+def test_the_tier_line_counts_only_as_the_first_line_of_the_report() -> None:
+    assert bench.tier_line("\nReview: light - 3 code lines.\n\n### Bugs\n") == "Review: light - 3 code lines."
+    assert bench.tier_line("Found two bugs.\n\nReview: light - 3 code lines.\n") is None
+    assert bench.tier_line("Review: I found two bugs.\n") is None  # the line names a tier
+
+
+def test_the_snapshot_survives_folders_and_links_and_sees_the_index(tmp_path: Path) -> None:
+    root = tmp_path / "p"
+    bench.build(None, root)
+    before = bench.snapshot(root)
+    (root / "env" / "lib").mkdir(parents=True)
+    (root / "env" / "lib64").symlink_to("lib")  # what python3 -m venv leaves
+    (root / "dangling").symlink_to("nowhere")
+    subprocess.run(["git", "init", "-q", str(root / "nested")], check=True)
+    assert bench.snapshot(root) != before  # and it did not raise
+    clean = tmp_path / "q"
+    bench.build(None, clean)
+    first = bench.snapshot(clean)
+    (clean / "notes" / "store.py").write_text("staged\n", encoding="utf-8")
+    bench.git(clean, "add", "notes/store.py")
+    bench.git(clean, "restore", "--source=HEAD", "--worktree", "notes/store.py")  # the disk is back, the index is not
+    assert bench.git(clean, "diff", "--cached", "--name-only").strip() == "notes/store.py"
+    assert bench.snapshot(clean) != first
+
+
+def test_a_range_does_not_run_across_lines_and_is_read_either_way() -> None:
+    seed = [{("notes/store.py", 23)}]
+    assert bench.mentioned(seed, "See notes/store.py:5\n- 40 code lines changed.") == [False]
+    assert bench.mentioned(seed, "notes/store.py:23\n- 0 is the default.") == [True]
+    assert bench.mentioned(seed, "notes/store.py:30-20") == [False]  # a reversed range is its first line only
+    assert bench.mentioned(seed, "notes/store.py:20-30") == [True]
+    assert bench.mentioned(seed, "notes/store.py:5 - 40 code lines changed") == [False]  # not a range
+
+
+def test_a_line_in_another_file_of_the_same_name_does_not_count() -> None:
+    seed = [{("notes/tags.csv", 6)}]
+    assert bench.mentioned(seed, "fixtures/tags.csv#L6") == [False]
+    assert bench.mentioned(seed, "[tags](./notes/tags.csv#L6)") == [True]
+    assert bench.mentioned(seed, "tags.csv:6") == [True]  # a bare name is the same file
+
+
+def test_the_snapshot_sees_what_git_would_not_show(tmp_path: Path) -> None:
+    root = tmp_path / "p"
+    bench.build(None, root)
+    states = [bench.snapshot(root)]
+    cache = root / "notes" / "__pycache__"
+    cache.mkdir()
+    (cache / "store.cpython-312.pyc").write_bytes(b"compiled")  # ignored by .gitignore, still left in the project
+    states.append(bench.snapshot(root))
+    (root / "notes" / "cli.py").chmod(0o755)  # git does not track this mode change here
+    states.append(bench.snapshot(root))
+    bench.git(root, "update-index", "--assume-unchanged", "README.md")
+    states.append(bench.snapshot(root))
+    locked = root / "locked.txt"
+    locked.write_text("x", encoding="utf-8")
+    locked.chmod(0)
+    (root / os.fsdecode(b"caf\xe9.txt")).write_bytes(b"latin-1 name")
+    states.append(bench.snapshot(root))  # and it did not raise
+    locked.chmod(0o600)
+    assert len(set(states)) == len(states)

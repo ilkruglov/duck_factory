@@ -124,10 +124,11 @@ document, a setup - is not sent to Codex, and the skipped review is not mentione
 For a large task - a new module, a choice between approaches that is costly to reverse, or work of more than a
 session - have Codex check the plan before any code. Skip it for smaller plans, and say that you skipped it.
 
-Find the plugin path as the `review` skill does (step 2 there, `CODEX_ROOT`), then from the project root:
+Find the plugin path as the `review` skill does (step 2 there) and put it in place of `<CODEX_ROOT>`, then from
+the project root:
 
 ```bash
-node "$CODEX_ROOT/scripts/codex-companion.mjs" task --fresh --model gpt-6-astra "Review the plan in .tmp/plans/<slug>.md against this repository. Do not change any files. Report only: decisions that are wrong or contradict the code, missing decisions that would change the implementation, and acceptance criteria that cannot be checked as written. Cite file:line. If the plan is sound, say so in one line. Answer in <the user's language>."
+timeout 900 node "<CODEX_ROOT>/scripts/codex-companion.mjs" task --fresh "Review the plan in .tmp/plans/<slug>.md against this repository. Do not change any files. Report only: decisions that are wrong or contradict the code, missing decisions that would change the implementation, and acceptance criteria that cannot be checked as written. Cite file:line. If the plan is sound, say so in one line. Answer in <the user's language>."
 ```
 
 It takes a few minutes: run it in the background and wait for the completion notice. Without `--write` Codex

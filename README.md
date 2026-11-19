@@ -116,7 +116,8 @@ The skill measures everything uncommitted (modified, staged and new files) and p
 | light | up to 50 code lines, 1 file, up to 5 call sites, reversible | `low` | review | no |
 | normal | everything else | `medium` | review | yes |
 | enhanced | a one-way door, a critical path, over 10 files, over 20 call sites, or you asked | `high` | adversarial, with a focus | yes |
-| repeat | after fixes | as light, aimed at the fixes | review | no |
+| final | a final review (below): the tier of the whole change, at least normal | - | per group | yes |
+| repeat | after fixes | `low` aimed at the fixes (`medium` after a one-way door) | adversarial, aimed at the fixes | no |
 
 A one-way door outweighs the other signs; `max` only when you ask for it by name. The tier comes from the table
 and nothing else: "this is the core of the system" does not raise it - that is what the list of critical paths
@@ -148,6 +149,30 @@ thresholds are a cautious guess, not a measurement.
   passed as an argument; with no plan it is skipped, and the report says so.
 
 All of them run in parallel.
+
+### Final review and groups
+
+Reviews of single steps miss what only shows when the whole work is in view. In one real session about twenty
+step-by-step reviews passed eight bugs that a single review of the whole 35-file change then found, all confirmed
+against the code: half of them were two code paths, written in different steps, that disagree.
+
+- **Final review.** Before a pull request, a merge (a branch or a worktree merged back included) or a release, and
+  when you ask to review all of the work, the change is everything since the commit the work started from,
+  committed or not: the base named in the plan or the handoff file, else the merge-base with the branch the work
+  will be merged into (never the branch's own upstream: after a push that is the last pushed commit). It is a row of
+  the tier table, at least normal, and always runs in groups.
+- **Groups.** At the normal and enhanced tiers every changed file goes to a group: code by subsystem, each test with
+  the code it tests. One group under 100 code lines or for 1-2 files, two under 500 lines, then one per three files
+  rounded up, from two to four. Briefs go to Codex as files (`--prompt-file`), never on the command line, where the shell would run
+  their backticks. Each group gets Codex (a `task`
+  with the brief below) and a fresh Claude subagent with the same brief, all in parallel; the built-in
+  `/code-review` does not run then: it takes the whole uncommitted diff, not a group and not the commits since a
+  base (with `max` it still runs, on the whole change). With one group an ordinary review stays as it was; a final
+  review always runs in groups.
+- **The brief** asks each reviewer to read its files in full, not only the changed lines; to follow every new type,
+  value, message or command across a function or module boundary to the code that consumes it, often outside the
+  change; and to check the code against the contracts of the external APIs, operating-system calls and libraries
+  it relies on. These three habits come from the reviewer of [oh-my-pi](https://github.com/can1357/oh-my-pi).
 
 ### Verified findings
 
@@ -194,15 +219,16 @@ created itself and says so.
 ### After you agree
 
 A failing test, the fix and a test run for each confirmed bug; then `/simplify`; then the project's tests; then
-a repeat review of the whole change at the light tier, aimed at the functions and files just fixed. Findings the
-previous round already reported are dropped. If two rounds in a row find only edge cases in the same place, the
+a repeat review of the whole change at the light tier, aimed at the functions and files just fixed (after a grouped or final
+round: the same groups and base). Findings the previous round already reported are dropped, except one a fix was
+meant to remove and that is still there. If two rounds in a row find only edge cases in the same place, the
 skill stops and asks you whether to simplify the approach or accept the limits - in plain words: what keeps going
 wrong, with an example, and for each option what you get and what you lose.
 
 ### Without Codex
 
-A limit, no login, a model error or no answer within five minutes: the skill does not retry and does not switch
-the model. It says so in one line, raises the built-in review one level (`low` to `medium`, `medium` to `high`),
+A limit, no login or a model error: the skill does not retry and does not switch the model. (A Codex reviewer
+that has given nothing in 15 minutes is only stopped and reported as not finished.) It says so in one line, raises the built-in review one level (`low` to `medium`, `medium` to `high`),
 gives the plan check to a subagent with a fresh context, and does not call Codex again in that session unless
 you say it is back.
 
@@ -309,7 +335,9 @@ What differs from the Claude Code version:
 | light | `low` + Codex | one general pass |
 | normal | `medium` + Codex + plan check | one general pass + plan check |
 | enhanced | `high` + adversarial Codex + plan check | one adversarial pass instead of the general one + plan check |
-| Questions in `grill` | the question dialog, up to 4 per round | `request_user_input` when the session has it (up to 3 per round), else text |
+| Large change or final review | Codex and a fresh Claude subagent per group of files, same brief | one sub-agent per group of files |
+| Questions in `grill` | the question dialog, up to 4 per round | by mode: in Plan mode `request_user_input` (up to 3 questions, 2-3 options), outside it `request_user_input_async` or `send_message_to_user_async` and always written out in the final message (up to 4), else text |
+| The boundary of the work in the plan | a `Not touching` section | a `Scope` section: what the work covers (the Codex model does not write what stays unchanged) |
 | Domain skills in `grill` | loaded with the Skill tool | their `SKILL.md` is read |
 | Plan check in `grill` | Codex, read-only | a sub-agent with a fresh context |
 | Simplification after fixes | `/simplify` | a step inside the skill |
@@ -349,8 +377,8 @@ start the whole skill.
 
 - Claude Code with the built-in `/code-review` and `/simplify`.
 - For the second opinion and the plan check: the `codex@openai-codex` plugin, logged in. Without it `review`
-  works with Claude only. The Codex model is pinned in the skills as `gpt-6-astra`; change it there if you use
-  another one.
+  works with Claude only. Codex runs the model and reasoning effort from its own configuration:
+  `~/.codex/config.toml`, a trusted project's `.codex/config.toml`, and `review_model` for its native review.
 - `python3` 3.9 or later on PATH: it runs the hooks.
 - Projects keep `.tmp/` in `.gitignore`: plans, handoff files and reproduction scripts go there.
 
@@ -375,7 +403,7 @@ like these:
 The skills are plain Markdown; after an edit bump the version and reinstall, or keep your own fork.
 
 - **Tier thresholds**: the table in `skills/review/SKILL.md`, step 1.
-- **Codex model**: `gpt-6-astra` in `skills/review/SKILL.md` and `skills/grill/SKILL.md`.
+- **Codex model**: `model` and `model_reasoning_effort` in `~/.codex/config.toml`; the skills pass none.
 - **Where plans and handoff files go**: `.tmp/plans/` and `.tmp/handoff/` in the same two skills, in
   `skills/handoff/SKILL.md` and in `scripts/context_hooks.py`.
 - **Critical paths** of a project: a `Critical paths` heading in its `CLAUDE.md` (`AGENTS.md` for Codex).
@@ -400,7 +428,7 @@ python3 evals/bench.py grill inferred --harness codex
   question), a list with "do everything" (the first round must ask which of it to do at all), two tasks named
   in the request (no such question) and a task with no code (a plan, but no review of it by another model).
 
-A seeded bug counts as found when the final message cites its line as `file:line`, which the skill's report
+A seeded bug counts as found when the final message cites its line as `file:line` or `file#Lline`, which the skill's report
 has to do anyway; both harnesses are judged by the final message alone, not by the trace of commands and sources.
 It is still a hint: read the report. A run without a final message (the harness failed, timed out or answered
 nothing) is reported as failed, with the end of its error output, not as missed bugs. One run is one sample;

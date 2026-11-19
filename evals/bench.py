@@ -6,8 +6,9 @@
     python3 evals/bench.py grill <prompt> --harness codex     # run a request and show whether grill took it
 
 A review case is a git repository with one commit and an uncommitted change that holds the seeded bugs; no test
-of the project fails on them, as with a real bug. The summary says which seeded lines the final report cites as
-file:line (a hint only: read the report), the tier line, the time and whether the working tree stayed untouched.
+of the project fails on them, as with a real bug. The summary says which seeded lines the final report
+cites as file:line or file#Lline (a hint only: read the report), the tier line, the time and whether the working
+tree stayed untouched.
 Runs are kept in `.tmp/evals/`. One run is one sample: repeat it before comparing two versions of a skill.
 """
 
@@ -19,6 +20,7 @@ import json
 import os
 import re
 import signal
+import stat
 import subprocess
 import tempfile
 import time
@@ -272,8 +274,16 @@ CASES = {
         ],
     ),
 }
-TIER = re.compile(r"^\W*Review:.*$", re.MULTILINE)  # the line the review skill starts its report with
-CITED = re.compile(r"([\w./-]+\.\w+):(\d+)(?:\s*-\s*(\d+))?")  # file:line or file:first-last
+TIER = re.compile(r"\W*Review:\W*(none|light|normal|enhanced|final|repeat)\b", re.IGNORECASE)  # the first line
+# file:line, file:Lline or file#Lline, alone or as a range written without spaces (file:20-30, file#L20-L30)
+CITED = re.compile(r"([\w./-]+\.\w+)[:#]L?(\d+)(?:-L?(\d+))?")
+
+
+def tier_line(report: str) -> str | None:
+    """The tier line, when it is the first line of the report, as the skill requires."""
+    first = next((line.strip() for line in report.splitlines() if line.strip()), "")
+    return first if TIER.match(first) else None
+
 
 GRILL = {
     "feature": ("interview", "Add export of the notes to CSV and JSON, the format chosen on the command line."),
@@ -321,19 +331,39 @@ def build(case: str | None, root: Path) -> None:
 
 
 def snapshot(root: Path) -> str:
-    """A hash of everything uncommitted, without `.tmp/`, where a review may write."""
-    digest = hashlib.sha256(git(root, "diff", "HEAD").encode())
-    for name in sorted(git(root, "ls-files", "-o", "--exclude-standard", "-z").split("\0")):  # -z: names as they are
-        if name and not name.startswith(".tmp/"):
-            digest.update(name.encode() + (root / name).read_bytes())
+    """A hash of the project as the skill left it: the commit, the index with its flags, and every file outside `.git`
+    and `.tmp/` (where a skill may write) with its type, mode and content, ignored files included."""
+    digest = hashlib.sha256()
+
+    def add(*parts: bytes) -> None:
+        for part in parts:  # each part with its length, so that no two different states give the same stream
+            digest.update(str(len(part)).encode() + b":" + part)
+
+    for args in (("rev-parse", "HEAD"), ("ls-files", "-s", "-v", "-z")):
+        add(subprocess.run(["git", *args], cwd=root, check=True, capture_output=True).stdout)
+    for folder, names, files in os.walk(root):
+        names[:] = sorted(n for n in names if not (folder == str(root) and n in (".git", ".tmp")))
+        for name in sorted(files) + names:
+            path = Path(folder) / name
+            info = path.lstat()
+            if path.is_symlink():
+                content = os.fsencode(os.readlink(path))
+            elif stat.S_ISREG(info.st_mode):
+                try:
+                    content = path.read_bytes()
+                except OSError:  # a file the run cannot read is still a change: its size and mode tell
+                    content = f"unreadable {info.st_size}".encode()
+            else:
+                content = b""
+            add(os.fsencode(path.relative_to(root)), str(info.st_mode).encode(), content)
     return digest.hexdigest()
 
 
 def seed_lines(seeds: list[tuple[str, list[tuple[str, str]]]], root: Path) -> list[set[tuple[str, int]]]:
-    """For each seed, the lines it can be cited at, as (file name, number), in the project at `root`."""
+    """For each seed, the lines it can be cited at, as (path in the project, number), in the project at `root`."""
     return [
         {
-            (Path(name).name, number)
+            (name, number)
             for name, piece in places
             for number, line in enumerate((root / name).read_text(encoding="utf-8").splitlines(), 1)
             if piece in line
@@ -342,11 +372,21 @@ def seed_lines(seeds: list[tuple[str, list[tuple[str, str]]]], root: Path) -> li
     ]
 
 
+def same_file(cited: str, seeded: str) -> bool:
+    """Whether a cited path names the seeded file: the same path, or one of them ends with the other at a slash."""
+    cited = cited.removeprefix("./")
+    return cited == seeded or cited.endswith("/" + seeded) or seeded.endswith("/" + cited)
+
+
 def mentioned(lines: list[set[tuple[str, int]]], report: str) -> list[bool]:
     """For each seed, whether the report cites one of its lines, alone or inside a range."""
-    cited = [(Path(m[1]).name, int(m[2]), int(m[3] or m[2])) for m in CITED.finditer(report)]
+    cited = []
+    for match in CITED.finditer(report):
+        first = int(match[2])
+        last = max(first, int(match[3] or first))  # a reversed range is read as its first line only
+        cited.append((match[1], first, last))
     return [
-        any(name == file and first <= number <= last for name, number in seed for file, first, last in cited)
+        any(same_file(path, seeded) and low <= number <= high for seeded, number in seed for path, low, high in cited)
         for seed in lines
     ]
 
@@ -433,12 +473,11 @@ def run(kind: str, name: str, harness: str, model: str | None, timeout: int, plu
         errors = (folder / "stderr.txt").read_text(encoding="utf-8", errors="replace").strip().splitlines()[-5:]
         print(f"  THE RUN FAILED ({why}); there is no result to judge.\n    " + "\n    ".join(errors))
         return False
+    print(f"  working tree untouched (outside .tmp/): {'yes' if snapshot(root) == before else 'NO'}")
     if kind == "review":
-        tier = TIER.search(text)
-        print(f"  tier line: {tier.group(0).strip() if tier else 'not found'} (expected tier: {CASES[name][1]})")
+        print(f"  tier line: {tier_line(text) or 'not the first line'} (expected tier: {CASES[name][1]})")
         for (title, _), found in zip(seeds, mentioned(lines, text)):
             print(f"  {'cited  ' if found else 'MISSING'}  {title}")
-        print(f"  working tree untouched: {'yes' if snapshot(root) == before else 'NO'}")
     else:
         print(f"  expected: {GRILL[name][0]}")
         if harness == "claude":

@@ -232,6 +232,19 @@ def description(path: Path) -> str:
     return next(line for line in path.read_text(encoding="utf-8").splitlines() if line.startswith("description:"))
 
 
+def tool_rows(path: Path) -> dict[str, str]:
+    """The rows of the question-tool table in a grill skill, by tool name."""
+    lines = path.read_text(encoding="utf-8").splitlines()
+    return {line.split("|")[1].strip(): line for line in lines if line.startswith("| `")}
+
+
+def review_brief(skills: Path) -> str:
+    """The reviewer brief of a review skill, up to its last sentence."""
+    text = words(skills / "review" / "SKILL.md")
+    brief = text[text.index("> Review the changes in the repository") :]
+    return brief[: brief.index("Answer in")]
+
+
 def test_the_hook_finds_a_plan_written_from_the_template_of_either_grill(tmp_path: Path) -> None:
     for skills in (CLAUDE, CODEX):
         text = (skills / "grill" / "SKILL.md").read_text(encoding="utf-8")
@@ -263,3 +276,121 @@ def test_review_measures_without_whitespace_and_knows_critical_paths() -> None:
     assert "counts as code), and not when you were started as the reviewer" in description(
         CODEX / "review" / "SKILL.md"
     )
+
+
+# --- the Codex model ------------------------------------------------------------------------
+
+
+def test_claude_skills_use_the_model_from_the_codex_config() -> None:
+    launches = [
+        line
+        for path in CLAUDE.rglob("SKILL.md")
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if "codex-companion.mjs" in line
+    ]
+    assert launches
+    for line in launches:  # the model and the effort come from ~/.codex/config.toml
+        assert not re.search(r"(--model|--effort|\s-m)\b", line), line
+
+
+def test_codex_grill_has_a_rule_for_each_question_tool() -> None:
+    rows = tool_rows(CODEX / "grill" / "SKILL.md")
+    assert {"`request_user_input`", "`request_user_input_async`", "`send_message_to_user_async`"} <= set(rows)
+    assert "next message" in rows["`request_user_input_async`"]
+    flat = words(CODEX / "grill" / "SKILL.md")
+    assert "elapsed time is not an answer" in flat.lower()
+    assert "Not touching" not in flat  # the model writes what the work covers, not what stays unchanged
+    assert "Scope:" in flat
+
+
+# --- review of the whole change, in groups ----------------------------------------------------
+
+
+def test_review_has_a_final_review_of_everything_since_the_work_started() -> None:
+    for skills in (CLAUDE, CODEX):
+        text = words(skills / "review" / "SKILL.md")
+        assert "Final review" in text, skills
+        for moment in ("pull request", "worktree", "release", "merge-base"):
+            assert moment in text, (skills, moment)
+
+
+def test_review_splits_a_large_change_into_groups_with_one_brief() -> None:
+    for skills in (CLAUDE, CODEX):
+        text = words(skills / "review" / "SKILL.md")
+        assert "from 2 to 4" in text and "100 code lines" in text and "500" in text, skills
+        brief = review_brief(skills)
+        assert "in full" in brief, skills
+        assert "consumes it" in brief, skills  # the other side of a boundary, often outside the change
+        assert "external APIs" in brief, skills  # the contracts the code relies on
+    claude = words(CLAUDE / "review" / "SKILL.md")
+    assert "a Claude subagent" in claude and "task --fresh" in claude
+
+
+def test_codex_review_keeps_its_report_format() -> None:
+    text = " ".join(
+        (ROOT / "plugins" / "duck-factory-codex" / "skills" / "review" / "SKILL.md").read_text(encoding="utf-8").split()
+    )
+    report = text[text.index("## 4. Report") : text.index("## 5.")]
+    positions = [
+        report.index(heading) for heading in ["**Bugs**", "**Plan check**", "**Quality notes**", "**Not confirmed**"]
+    ]
+    assert positions == sorted(positions)
+    assert "word for word" in report
+
+
+def test_review_fixes_from_the_first_review_in_groups() -> None:
+    for skills in (CLAUDE, CODEX):
+        text = words(skills / "review" / "SKILL.md")
+        assert "| final |" in text, skills  # the final review is a row of the tier table, not a rule beside it
+        assert "the branch the work will be merged into" in text, skills  # not the branch's own upstream
+        assert "Every changed file" in text, skills  # tests included
+        assert "cannot simply be reverted" not in review_brief(skills), skills  # the brief states the tier's reason
+        assert "Do the review yourself" in text, skills  # a reviewer does not start the review skill again
+        assert "the `Groups:` line" in text, skills  # allowed by the report format
+    claude = words(CLAUDE / "review" / "SKILL.md")
+    assert "--prompt-file" in claude  # a brief inside "..." would be run by the shell: it has backticks
+    assert "15 minutes" in claude
+    assert "into every command" in claude  # a shell variable does not survive between Bash calls
+    assert "at `max` on the whole change" in claude
+
+
+def test_codex_grill_always_repeats_open_questions_in_the_final_message() -> None:
+    assert "final message" in words(CODEX / "grill" / "SKILL.md")
+    for readme in ("README.md", "README.ru.md"):
+        lines = (ROOT / readme).read_text(encoding="utf-8").splitlines()
+        row = next(line for line in lines if "`grill`" in line and "request_user_input" in line)
+        assert "`request_user_input_async`" in row and "Plan mode" in row, readme
+        assert readme.endswith(".ru.md") or "final message" in row, readme
+
+
+def test_second_round_fixes_in_the_skills() -> None:
+    for skills in (CLAUDE, CODEX):
+        text = words(skills / "review" / "SKILL.md")
+        assert "rounded up" in text, skills
+        assert "in the worktree of the branch being merged" in text, skills
+        assert "adding a delete command is reversible" in text, skills  # what a one-way door is not
+        assert "the commit hash, not the word `HEAD`" in text, skills
+    claude = words(CLAUDE / "review" / "SKILL.md")
+    assert "CODEX_ROOT=" not in claude  # the command prints the path, the agent puts it into every command
+    launch = 'node "<CODEX_ROOT>/scripts/codex-companion.mjs"'
+    assert claude.count(launch) == claude.count("timeout 900 " + launch) > 0  # every Codex command has its limit
+    assert "in single quotes" in claude  # the focus of a repeat: no backticks, no $
+    assert "$CODEX_ROOT" not in words(CLAUDE / "grill" / "SKILL.md")
+    assert "all the changed files" in words(CODEX / "review" / "SKILL.md")
+
+
+def test_codex_grill_asks_by_mode() -> None:
+    rows = tool_rows(CODEX / "grill" / "SKILL.md")
+    assert "Plan mode" in rows["`request_user_input`"] and "not for these questions" not in rows["`request_user_input`"]
+    assert "Plan mode" in rows["`request_user_input_async`"]
+    text = words(CODEX / "grill" / "SKILL.md")
+    assert "end the turn with the open questions written out in your final message" in text
+    assert "in Plan mode, give the plan in your final answer" in text
+
+
+def test_readmes_show_the_final_row_and_the_anchor_links() -> None:
+    final_ru = "\u0444\u0438\u043d\u0430\u043b\u044c\u043d\u0430\u044f"  # the Russian name of the tier
+    for readme, final in (("README.md", "| final |"), ("README.ru.md", "| " + final_ru + " |")):
+        text = (ROOT / readme).read_text(encoding="utf-8")
+        assert final in text, readme
+        assert "#L" in text, readme  # the bench reads file#Lline links too

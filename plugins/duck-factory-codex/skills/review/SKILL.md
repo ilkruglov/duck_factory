@@ -1,6 +1,6 @@
 ---
 name: review
-description: Use after finishing a code change, before the report and before a commit - the one code review to run. Picks its own depth from measured size, blast radius and reversibility, runs the review and a check against the plan in sub-agents with a fresh context, verifies each finding, and reports. It is for a change you made in this session, or when the user asks for this skill by name. It only finds - fixes come after the user agrees. Not for changes to docs or comments only (a data or config file that the project's code reads counts as code), and not when you were started as the reviewer of someone else's diff (a `codex review` run, a request to check changes): then just review.
+description: Use after finishing a code change, before the report and before a commit - the one code review to run. Picks its own depth from measured size, blast radius and reversibility, runs the review (one sub-agent per group of files on a large change) and a check against the plan in sub-agents with a fresh context, verifies each finding, and reports. It is for a change you made in this session, as a final review of everything since the work started before a pull request, a merge or a release, or when the user asks for this skill by name. It only finds - fixes come after the user agrees. Not for changes to docs or comments only (a data or config file that the project's code reads counts as code), and not when you were started as the reviewer of someone else's diff (a `codex review` run, a request to check changes): then just review.
 ---
 
 # Review
@@ -36,10 +36,22 @@ git ls-files -o --exclude-standard      # new files; count lines of the ones tha
   code that nothing calls yet counts as 0.
 - **One-way door**: the change does something that cannot simply be reverted - a data migration, deleting
   data or files, a release or publication, an external API or webhook contract, the format of files already on
-  disk.
+  disk. It is about what applying this change does to what already exists, not about what a new feature lets users
+  do later: adding a delete command is reversible code.
 - **Critical paths**: the paths the project names under a `Critical paths` heading in its `AGENTS.md`, one
   path or glob per line. A change that touches one of them is reviewed at the enhanced tier. No such list:
   nothing is critical, and you do not make one up from how important the code looks.
+
+**Final review.** Before a pull request, a merge - a branch or a worktree merged back included - or a release, and
+when the user asks to review all of the work, the change is everything since the commit the work started from,
+committed or not. Run it in the worktree of the branch being merged, not in the receiving branch. The base is the
+commit named in the plan or the handoff file; else `git merge-base HEAD <the branch the work will be merged into>`
+- for a local merge, that local branch; for a pull request, its target as `origin/<target>` after `git
+fetch` - and never the branch's own upstream, which after a push is the last pushed commit. If
+the base comes out as `HEAD` while the work has commits, ask the user for it. Write the base as the commit hash,
+not the word `HEAD`, so that a commit between rounds does not move it. Measure the change with `git diff <base>`
+in place of `git diff HEAD`. Reviews of single steps do not replace it: a bug where two paths written in different
+steps meet shows only when both are in view.
 
 | Tier | When | Review pass | Plan check |
 |---|---|---|---|
@@ -47,6 +59,7 @@ git ls-files -o --exclude-standard      # new files; count lines of the ones tha
 | light | up to 50 code lines, 1 file, up to 5 call sites, no one-way door | general | no |
 | normal | everything else | general | yes |
 | enhanced | a one-way door, or a critical path, or over 10 files, or over 20 call sites, or the user asked | adversarial, instead of general | yes |
+| final | a final review (step 1): the tier the table gives for the whole change, at least normal | general or adversarial, per group | yes |
 | repeat | after fixes from the previous round | general, aimed (see step 5) | no |
 
 A one-way door outweighs every other sign. In doubt between two tiers, take the higher.
@@ -65,6 +78,21 @@ as its review section.
 
 For tier "none" say so in one line and stop.
 
+### Groups
+
+At the normal and enhanced tiers, and in a final review, split the change into groups and give each group its own
+reviewers. Every changed file goes to a group: the code files by subsystem - the same directory or module together
+- and each test with the code it tests, or with the nearest group. How many groups, counted by code lines and code
+files:
+
+| Change | Groups |
+|---|---|
+| under 100 code lines, or 1-2 files | 1 |
+| under 500 code lines | 2 |
+| larger | one per three files, rounded up, from 2 to 4 |
+
+With more than one group, the line after the tier line names them: `Groups: audio (player.rs, asio.rs), ui (gui.rs)`.
+
 ## 2. Run the checks in sub-agents
 
 The author of a change reviews it badly: it reads what it meant to write. Every check runs in a sub-agent that has
@@ -73,23 +101,27 @@ not seen this conversation.
 Spawn each one with the sub-agent tool (`collaboration.spawn_agent`) and **`fork_turns="none"`**: by default a
 sub-agent inherits the whole conversation, and then it is not a fresh reader. Give it a brief that stands alone:
 the absolute path of the repository and the brief below, word for word. Start the checks of one tier together and
-wait for all of them.
+wait for all of them; if the tool refuses one for a limit on running sub-agents, start it when another finishes.
 
 Do not run `codex review` from inside the session: in the session's sandbox it fails to start.
 
-**General pass** (light, normal, repeat):
+**The brief** - for every pass, word for word with the brackets filled. With several groups, run one pass per
+group, all started together; with one group, one pass whose files are all the changed files. `<base>` is the commit hash of `HEAD` for an ordinary review and the base from step 1 for a final review.
 
-> Review the uncommitted changes in the repository at `<path>` (modified and new files) for bugs. Do not change any
-> files. Report each bug separately: what breaks and on what input, file:line, and how you verified it. Number the
-> findings.
+> Review the changes in the repository at `<path>` since `<base>` (`git diff <base>` shows them, uncommitted files
+> included; new files: `git ls-files -o --exclude-standard`). Your part is these files: `<files>`; read any other
+> file you need. Do not change any files. Do the review yourself: do not start a review skill or other reviewers.
+> Read each of your files in full, not only the changed lines. For every new or changed type, value, message or
+> command that crosses a function or module boundary, find the code that consumes it - often outside the change -
+> and check that it handles it rather than dropping it. Check the code against the contracts of the external APIs,
+> operating-system calls and libraries it relies on, from their documentation or source. `<At the enhanced tier:
+> This change is reviewed at the enhanced tier because <the reason from the tier line>: try to prove it is broken
+> in these directions - <directions> - and reproduce each finding with a script or command, without editing
+> project files. For each finding name the test that should have caught it.>` Report each bug separately: what
+> breaks and on what input, file:line, and how you verified it. Number the findings. Answer in <the user's
+> language>.
 
-**Adversarial pass** (enhanced; it replaces the general pass, it is not added to it):
-
-> Assume the uncommitted changes in the repository at `<path>` (modified and new files) are broken and try to
-> prove it. Do not change any files. Attack in these directions: `<directions>`. Reproduce each finding (a script
-> or command, without editing project files) rather than only reading. For each finding name the test that should
-> have caught it and why it did not. Report each bug separately: what breaks and on what input, file:line, and the
-> reproduction. Number the findings.
+The brief without the bracketed sentence is the general pass; with it, at the enhanced tier, the adversarial pass.
 
 Take the directions from what this diff puts at risk: error handling and silent failures; stale or missing state;
 ordering and precedence; concurrency; the migration and its rollback; places where the docs promise what the code
@@ -102,7 +134,7 @@ door needs, and why it is not run on everything.
 **Plan check** (normal and enhanced). The plan is the one written in this session by `grill`, or named in the
 handoff file, or given by the user. No such plan, or several and none named: skip the check and say so.
 
-> Compare the uncommitted changes in the repository at `<path>` with the plan in `<plan path>`. Do not change any
+> Compare the uncommitted changes (in a final review: the changes since `<base>`) in the repository at `<path>` with the plan in `<plan path>`. Do not change any
 > files. Report only: (a) what the plan asks for that is missing or partial; (b) behaviour in the diff the plan did
 > not ask for; (c) acceptance criteria that nothing in the diff or the tests checks. Quote the plan line and cite
 > file:line. If the change matches the plan, say so in one line.
@@ -127,7 +159,9 @@ bugs.
 
 ## 4. Report
 
-In this order, and nothing before it but the tier line:
+The tier line, with several groups the `Groups:` line, then these four sections under these headings, in this
+order. This format is required: keep the tier line word for word as in step 1, keep every heading even when its section is "none", and do not fold the
+sections into one text, even where it differs from your usual style:
 
 1. **Bugs**: confirmed and unchecked ones, the most damaging first. Each: what breaks and on what input,
    `file:line`, the mark from step 3.
@@ -150,9 +184,11 @@ In this order:
 2. Simplify what this change touched: remove duplication, abstractions that have one user, dead code and
    leftovers of the fixes. Do not change behaviour and do not widen the diff to code the change did not touch.
 3. The project's tests.
-4. A **repeat** review of the whole change: one general pass whose brief also lists the functions and files just
-   fixed and asks to check those and what depends on them. If the original change was a one-way door, repeat at
-   the normal tier instead. Drop findings the previous round already reported and the user already decided on.
+4. A **repeat** review of the whole change with the same groups and the same `<base>` as the round it repeats, the
+   general brief with one sentence added: the functions and files just fixed, to check together with what depends
+   on them; new files the fixes added join the group of the code they belong to. If the original change was a
+   one-way door, use the adversarial brief instead. Drop findings the previous round already reported and the user
+   already decided on - except one the fix was meant to remove: if it is still there, it is a bug again.
 
 If two rounds in a row find only edge cases in the same place, stop and ask the user: simplify the approach or
 accept the limits. Do not fix in circles.
