@@ -330,6 +330,18 @@ def build(case: str | None, root: Path) -> None:
         CASES[case][0](root)
 
 
+def file_hash(path: Path, size: int) -> bytes:
+    """The hash of a file's content, read in pieces: a large file an agent left must not take all the memory."""
+    digest = hashlib.sha256()
+    try:
+        with path.open("rb") as file:
+            while piece := file.read(1 << 20):
+                digest.update(piece)
+    except OSError:  # a file the run cannot read is still a change: its size and mode tell
+        return f"unreadable {size}".encode()
+    return digest.hexdigest().encode()
+
+
 def snapshot(root: Path) -> str:
     """A hash of the project as the skill left it: the commit, the index with its flags, and every file outside `.git`
     and `.tmp/` (where a skill may write) with its type, mode and content, ignored files included."""
@@ -346,13 +358,10 @@ def snapshot(root: Path) -> str:
         for name in sorted(files) + names:
             path = Path(folder) / name
             info = path.lstat()
-            if path.is_symlink():
+            if stat.S_ISLNK(info.st_mode):
                 content = os.fsencode(os.readlink(path))
             elif stat.S_ISREG(info.st_mode):
-                try:
-                    content = path.read_bytes()
-                except OSError:  # a file the run cannot read is still a change: its size and mode tell
-                    content = f"unreadable {info.st_size}".encode()
+                content = file_hash(path, info.st_size)
             else:
                 content = b""
             add(os.fsencode(path.relative_to(root)), str(info.st_mode).encode(), content)

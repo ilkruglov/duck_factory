@@ -39,9 +39,14 @@ git ls-files -o --exclude-standard      # new files; count lines of the ones tha
   data or files, a release or publication, an external API or webhook contract, the format of files already on
   disk. It is about what applying this change does to what already exists, not about what a new feature lets users
   do later: adding a delete command is reversible code.
-- **Critical paths**: the paths the project names under a `Critical paths` heading in its `CLAUDE.md`, one
-  path or glob per line. A change that touches one of them is reviewed at the enhanced tier. No such list:
-  nothing is critical, and you do not make one up from how important the code looks.
+- **Critical paths**: the paths the project names under a `Critical paths` heading in its `CLAUDE.md` (its
+  `AGENTS.md` when it has no `CLAUDE.md`: Claude Code then loads that one), one path or glob per line. A change
+  that touches one of them is reviewed at the enhanced tier. No such list: nothing is critical, and you do not make
+  one up from how important the code looks.
+- **Security paths**: the paths the project names under a `Security paths` heading in the same file - sign-in,
+  permissions, payments, anything that takes input from outside - one path or glob per line. A change that touches
+  one makes the review offer the security pass (step 2). It does not change the tier. No such list: no security
+  paths, and you do not make one up from what the code handles.
 
 **Final review.** Before a pull request, a merge - a branch or a worktree merged back included - or a release, and
 when the user asks to review all of the work, the change is everything since the commit the work started from,
@@ -75,7 +80,7 @@ Before starting, say the choice in one line: the numbers, then the row of the ta
 line is the first line of the final report, before any heading:
 `Review: normal - 132 code lines, 3 files, 7 call sites, reversible. Decided by: over 50 code lines.`
 
-For tier "none" say so in one line and stop.
+For tier "none" say so in one line and stop; only the security pass may follow (step 2).
 
 ### Groups
 
@@ -94,7 +99,11 @@ With more than one group, the line after the tier line names them: `Groups: audi
 
 ## 2. Run the checks, in parallel
 
-Start all of them in one message and wait for the completion notices; do not poll.
+Start all of them in one message and wait for the completion notices; do not poll. Before the first brief, make this
+review's folder with `mkdir -p .tmp/review && mktemp -d .tmp/review/XXXXXX` and put the path it prints in place of
+`.tmp/review/<run>` below: two reviews in one worktree must not overwrite each other's briefs. In every brief below,
+`<path>` is the absolute path of the repository and `<base>` is the commit hash of `HEAD`, or in a final review the
+base from step 1.
 
 **With one group** (light, and normal or enhanced that fit in one group) run the built-in review and Codex as below;
 **with several groups, or in a final review**, the reviewers in "Reviewers per group".
@@ -129,38 +138,65 @@ output ends with a `# Codex Review` or `# Codex Adversarial Review` block. A wor
 every uncommitted file, including changes that are not yours: say so when such files are in `git status`.
 
 **Reviewers per group.** For each group start two reviewers, both with the group brief below, all of them in one
-message. Codex: write the brief to `.tmp/review/<group>.md` - never put it into the command line: it has
+message. Codex: write the brief to `.tmp/review/<run>/group-<number>.md` - never put it into the command line: it has
 backticks, and the shell would run them - and run in the background (several such tasks run in parallel):
 
 ```bash
-timeout 900 node "<CODEX_ROOT>/scripts/codex-companion.mjs" task --fresh --prompt-file .tmp/review/<group>.md
+timeout 900 node "<CODEX_ROOT>/scripts/codex-companion.mjs" task --fresh --prompt-file .tmp/review/<run>/group-<number>.md
 ```
 
 Claude: a Claude subagent with a fresh context (Agent tool, `general-purpose`) with the same brief. The built-in
-review does not run then: it takes the whole uncommitted diff, not a group and not the commits since a base. If
-the user asked for `max`, also run the built-in review at `max` on the whole change; it takes the commits since
-the upstream, not since the base, so say in the report when the two differ. `<base>` is the commit hash of `HEAD`
-for an ordinary review and the base from step 1 for a final review.
+review does not run then: it takes the whole uncommitted diff, not a group and not the commits since a base. If the
+user asked for `max`, also run the built-in review at `max` on the whole change; it takes the commits since the
+upstream, not since the base, so say in the report when the two differ.
 
 > Review the changes in the repository at `<path>` since `<base>` (`git diff <base>` shows them, uncommitted files
 > included; new files: `git ls-files -o --exclude-standard`). Your part is these files: `<files>`; read any other
 > file you need. Do not change any files. Do the review yourself: do not start a review skill or other reviewers.
-> Read each of your files in full, not only the changed lines. For every new or changed type, value, message or
-> command that crosses a function or module boundary, find the code that consumes it - often outside the change -
-> and check that it handles it rather than dropping it. Check the code against the contracts of the external APIs,
-> operating-system calls and libraries it relies on, from their documentation or source. `<At the enhanced tier:
-> This change is reviewed at the enhanced tier because <the reason from the tier line>: try to prove it is broken
-> in these directions - <focus> - and reproduce each finding with a script or command, without editing project
-> files. For each finding name the test that should have caught it.>` Report each bug separately: what breaks and
-> on what input, file:line, and how you verified it. Number the findings. Answer in <the user's language>.
+> Read the project's rules first - the instruction files Claude Code would load for your files (`CLAUDE.md`,
+> `AGENTS.md`, `.claude/rules/` and the like) not already in your context, and the files they point to that cover
+> your files - and report a change that breaks them as a finding. Read each of your files in full, not only the
+> changed lines. For every new or changed type, value, message or command that crosses a function or module boundary,
+> find the code that consumes it - often outside the change - and check that it handles it rather than dropping it.
+> Check the code against the contracts of the external APIs, operating-system calls and libraries it relies on, from
+> their documentation or source. `<At the enhanced tier: This change is reviewed at the enhanced tier because <the
+> reason from the tier line>: try to prove it is broken in these directions - <focus> - and reproduce each finding
+> with a script or command, without editing project files. For each finding name the test that should have caught
+> it.>` Report each bug separately: what breaks and on what input, file:line, and how you verified it. Number the
+> findings. Answer in <the user's language>.
+
+**Security pass - only after the user says yes.** Offer it in a final review and when the change touches a security
+path (step 1), once per piece of work: not again in a repeat round, whatever the answer was. Run it without a
+question when the user asked for it. Offer it right after starting the checks above, with one AskUserQuestion: why it
+is offered (a final review, or the security paths the change touches, by name) and that it is one more reviewer for a
+few minutes; the options: run it, skip it. If AskUserQuestion is not available (a headless run), ask it among the
+questions at the end of the report (step 4). On yes, write the brief below to `.tmp/review/<run>/security.md` and run
+it in the background:
+
+```bash
+timeout 900 node "<CODEX_ROOT>/scripts/codex-companion.mjs" task --fresh --prompt-file .tmp/review/<run>/security.md
+```
+
+> Look for security vulnerabilities in the changes in the repository at `<path>` since `<base>` (`git diff <base>`
+> shows them, uncommitted files included; new files: `git ls-files -o --exclude-standard`). Do not change any files.
+> Do the review yourself: do not start a review skill, a security scan or other reviewers. Read the project's rules
+> first - the instruction files Claude Code would load for the changed files (`CLAUDE.md`, `AGENTS.md`,
+> `.claude/rules/` and the like) not already in your context, and the files they point to that cover them - and its
+> `SECURITY.md` files, if there are any, from the root down to the changed files, the nearest one winning: if they
+> describe the threat model or what the project counts as a finding, follow them. First say who can reach the changed
+> code and what input crosses a trust boundary, then check injection (SQL, command, path, template), authentication
+> and authorization bypasses, data of one user or tenant reaching another, secrets in code or logs, unsafe
+> deserialization or eval, cross-site scripting, server-side request forgery, and new or unpinned dependencies.
+> Report only what is reachable: for each finding the path from the input to the harm, file:line, how you verified
+> it, and its level - critical, high, medium or low. Number the findings. Answer in <the user's language>.
 
 **Plan check** (normal and enhanced). The plan is the one written in this session by `grill`, or named in the
 handoff file, or passed as an argument. No such plan, or several and none named: skip the check and say so.
 
-Write this brief to `.tmp/review/plan-check.md` and run in the background:
+Write this brief to `.tmp/review/<run>/plan-check.md` and run in the background:
 
 ```bash
-timeout 900 node "<CODEX_ROOT>/scripts/codex-companion.mjs" task --fresh --prompt-file .tmp/review/plan-check.md
+timeout 900 node "<CODEX_ROOT>/scripts/codex-companion.mjs" task --fresh --prompt-file .tmp/review/<run>/plan-check.md
 ```
 
 > Compare the uncommitted changes (in a final review: the changes since `<base>`) in the repository at `<path>` with
@@ -176,7 +212,7 @@ with Claude only:
 
 - the built-in review goes one level up (`low` to `medium`, `medium` to `high`);
 - with groups, only the Claude subagents review them;
-- the plan check is done by a subagent with a fresh context and the same brief;
+- the plan check and the security pass are done by a subagent with a fresh context and the same brief;
 - do not call Codex again in this session unless the user says it is back.
 
 If the Codex plugin is not enabled in this project, that is the same case. A Codex reviewer that has given nothing
@@ -199,24 +235,32 @@ and name who found it. Findings about style or simplification need no proof; kee
 
 In this order, and nothing before it but the tier line and, with several groups, the `Groups:` line:
 
-1. **Bugs**: confirmed and unchecked ones, the most damaging first. Each: what breaks and on what input,
+1. **Bugs**: confirmed and unchecked ones, the most damaging first; a security finding is marked as such, with
+   its level. Each: what breaks and on what input,
    `file:line`, the mark from step 3, who found it.
 2. **Plan check**: missing, extra, unchecked criteria - or that it was skipped and why.
 3. **Quality notes**: briefly; `/simplify` will take most of them.
 4. **Not confirmed**: one line each, so the user can disagree.
 
-Then what was not covered: tests not run, platforms not checked, Codex unavailable.
+Then what was not covered: tests not run, platforms not checked, Codex unavailable, the security pass skipped.
 
-End with one question, when there is anything to fix or simplify: fix the confirmed bugs and run `/simplify`?
-A finding that is a decision rather than a bug (a trade-off, a change of behaviour) goes to the user as its own
-question, not into the fix list.
+End with the open questions, numbered, so that one yes cannot answer two: the security pass, when it is offered in
+text (step 2); fix the confirmed bugs and run `/simplify`, when there is anything to fix or simplify; each finding
+that is a decision rather than a bug (a trade-off, a change of behaviour), as its own question. With a yes to the
+security pass and to the fixes, the pass runs first.
 
 ## 5. After the user agrees
 
-In this order:
+A yes covers the findings the user has seen and the steps below; findings that come later, such as those of the
+security pass, are fixed after the user has seen them and said yes. In this order:
 
-1. Each confirmed bug: a failing test, the fix, the test run.
-2. `/simplify` (Skill tool, skill `simplify`). It edits by itself; look at its `git diff` afterwards.
+1. Each confirmed bug: a failing test that fails on the bug itself - on the wrong value, not on an import error
+   or a typo in the test - then the fix, then the test run.
+2. `/simplify` (Skill tool, skill `simplify`) for the code. It edits by itself; look at its `git diff` afterwards.
+   For the text of skills, prompts and docs in the change, one subagent with a fresh context does this step instead:
+   it looks for rules repeated or contradicting each other within the text, between mirrored versions and with the
+   README, rules longer than an agent needs, and instructions that make an agent do needless calls and reads; you
+   apply what it finds without changing what the rules say.
 3. The project's tests.
 4. A **repeat** review of the whole change at the light tier, aimed: tell the reviewers which functions and files
    were just fixed and ask them to check those, what depends on them and the contracts they rely on (Codex:

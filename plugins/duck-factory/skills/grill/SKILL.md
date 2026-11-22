@@ -48,13 +48,25 @@ a skill only because its name looks close.
 ## The interview
 
 Map the task as a **design tree**: every decision branches into the decisions that hang off it. Ask only about
-decisions that change the plan. A decision with an obvious answer (the code, an earlier decision or the user's
-rules settle it) is not a question: take it as a default. Defaults are not hidden: they are shown at the
-confirmation and listed in the plan, where the user can change them.
+decisions that change the plan. A decision with an obvious answer (the code, an earlier decision or the user's rules
+settle it) is not a question: take it as a default. Defaults are not hidden, even when only one question is asked:
+put them into the text of the next question you ask or, when no question is left, into the confirmation; and list
+them in the plan, where the user can change them.
 
 **Facts are your job, decisions are the user's.** Never ask what you can look up: code, configs, logs, versions,
 how a tool behaves. Look it up or measure it first. When a lookup is long, start it in a subagent and ask the
 questions that do not depend on it meanwhile.
+
+**Decided before.** A decision the user already made is not asked again. Before the first round, search once, by key
+words and without reading every file, for the decisions this task needs: in the earlier plans in every `.tmp/plans/`
+from the current folder up to the root of the repository (outside a repository, in the current folder), and in the
+project's rules: the instruction files Claude Code would load for the files this task touches (`CLAUDE.md`,
+`AGENTS.md`, `.claude/rules/` and the like) not already in your context, and the files they point to that cover those
+files. From a plan, take a decision only from the `Decisions:` section of a plan with `Status: done`, never from its
+`Taken by default, not asked` section (those were your own picks) and never from a plan that was dropped. Plans are
+written in the user's language, so look for these sections under a translated heading too; only the `Status:` line is
+always in English. When two plans disagree, ask the user which one holds, quoting both. If nothing the decision
+rested on has changed, it is a default like any other, shown with the plan or file it came from.
 
 Ask with the **AskUserQuestion** tool, never as a numbered list in text. If the tool is not available in this
 session (a headless run), ask in text by the same rules: at most 4 questions, each standing alone, your
@@ -131,10 +143,10 @@ the project root:
 timeout 900 node "<CODEX_ROOT>/scripts/codex-companion.mjs" task --fresh "Review the plan in .tmp/plans/<slug>.md against this repository. Do not change any files. Report only: decisions that are wrong or contradict the code, missing decisions that would change the implementation, and acceptance criteria that cannot be checked as written. Cite file:line. If the plan is sound, say so in one line. Answer in <the user's language>."
 ```
 
-It takes a few minutes: run it in the background and wait for the completion notice. Without `--write` Codex
-cannot edit files. Report its findings as it gave them and say which you checked and agree with. Do not rewrite
-the plan from them yourself: each finding that is a decision goes to the user as a question, and the plan is
-updated from the answers.
+Use `gtimeout` on macOS (from coreutils) in place of `timeout`. It takes a few minutes: run it in the background
+and wait for the completion notice. Without `--write` Codex cannot edit files. Report its findings as it gave them
+and say which you checked and agree with. Do not rewrite the plan from them yourself: each finding that is a
+decision goes to the user as a question, and the plan is updated from the answers.
 
 Show the path and the plan. The plan is not consent to start: changing code or anything else still needs the
 user's explicit go-ahead for this plan.
@@ -144,6 +156,9 @@ user's explicit go-ahead for this plan.
 - Before starting the work, and again after the context was compacted or in a new session, read the plan file:
   it, not your memory of the interview, is the source of truth.
 - A decision that turns out wrong during the work is not yours to change silently: stop, say what you found, ask.
+  When the user changes a decision during the work, update the plan so that it keeps saying what was decided: the
+  decision under `Decisions:` (a default from `Taken by default` that the user changed moves there), and the
+  acceptance criteria and the `Not touching:` section that followed from the old one.
 - A defect in work the user already agreed to is different: the result does not do what the plan says, and you
   can see that yourself. Redo it without asking and say what was wrong and what you changed. Ask only when the fix
   needs a decision the plan does not hold.

@@ -41,6 +41,10 @@ git ls-files -o --exclude-standard      # new files; count lines of the ones tha
 - **Critical paths**: the paths the project names under a `Critical paths` heading in its `AGENTS.md`, one
   path or glob per line. A change that touches one of them is reviewed at the enhanced tier. No such list:
   nothing is critical, and you do not make one up from how important the code looks.
+- **Security paths**: the paths the project names under a `Security paths` heading in its `AGENTS.md` - sign-in,
+  permissions, payments, anything that takes input from outside - one path or glob per line. A change that touches
+  one makes the review offer the security pass (step 2). It does not change the tier. No such list: no security
+  paths, and you do not make one up from what the code handles.
 
 **Final review.** Before a pull request, a merge - a branch or a worktree merged back included - or a release, and
 when the user asks to review all of the work, the change is everything since the commit the work started from,
@@ -76,7 +80,7 @@ line is the first line of the final report, before any heading:
 When the review is a step of a larger task, the tier line and the review's results go into that task's report,
 as its review section.
 
-For tier "none" say so in one line and stop.
+For tier "none" say so in one line and stop; only the security pass may follow (step 2).
 
 ### Groups
 
@@ -105,31 +109,55 @@ wait for all of them; if the tool refuses one for a limit on running sub-agents,
 
 Do not run `codex review` from inside the session: in the session's sandbox it fails to start.
 
-**The brief** - for every pass, word for word with the brackets filled. With several groups, run one pass per
-group, all started together; with one group, one pass whose files are all the changed files. `<base>` is the commit hash of `HEAD` for an ordinary review and the base from step 1 for a final review.
+**The brief** - for the general and adversarial passes, word for word with the brackets filled. With several groups,
+run one pass per group, all started together; with one group, one pass whose files are all the changed files. In
+every brief below, `<path>` is the absolute path of the repository and `<base>` is the commit hash of `HEAD`, or in a
+final review the base from step 1.
 
 > Review the changes in the repository at `<path>` since `<base>` (`git diff <base>` shows them, uncommitted files
 > included; new files: `git ls-files -o --exclude-standard`). Your part is these files: `<files>`; read any other
 > file you need. Do not change any files. Do the review yourself: do not start a review skill or other reviewers.
-> Read each of your files in full, not only the changed lines. For every new or changed type, value, message or
-> command that crosses a function or module boundary, find the code that consumes it - often outside the change -
-> and check that it handles it rather than dropping it. Check the code against the contracts of the external APIs,
-> operating-system calls and libraries it relies on, from their documentation or source. `<At the enhanced tier:
-> This change is reviewed at the enhanced tier because <the reason from the tier line>: try to prove it is broken
-> in these directions - <directions> - and reproduce each finding with a script or command, without editing
-> project files. For each finding name the test that should have caught it.>` Report each bug separately: what
-> breaks and on what input, file:line, and how you verified it. Number the findings. Answer in <the user's
-> language>.
+> Read the project's rules first - the instruction files Codex would load for your files (`AGENTS.md`,
+> `AGENTS.override.md` and the like) not already in your context, and the files they point to that cover your files -
+> and report a change that breaks them as a finding. Read each of your files in full, not only the changed lines. For
+> every new or changed type, value, message or command that crosses a function or module boundary, find the code that
+> consumes it - often outside the change - and check that it handles it rather than dropping it. Check the code
+> against the contracts of the external APIs, operating-system calls and libraries it relies on, from their
+> documentation or source. `<At the enhanced tier: This change is reviewed at the enhanced tier because <the reason
+> from the tier line>: try to prove it is broken in these directions - <focus> - and reproduce each finding with a
+> script or command, without editing project files. For each finding name the test that should have caught
+> it.>` Report each bug separately: what breaks and on what input, file:line, and how you verified it. Number the
+> findings. Answer in <the user's language>.
 
 The brief without the bracketed sentence is the general pass; with it, at the enhanced tier, the adversarial pass.
 
-Take the directions from what this diff puts at risk: error handling and silent failures; stale or missing state;
+Take the focus from what this diff puts at risk: error handling and silent failures; stale or missing state;
 ordering and precedence; concurrency; the migration and its rollback; places where the docs promise what the code
 does not do; whether the tests would still pass if the change were wrong.
 
 On measured diffs the adversarial pass found the same bugs as the general one and took two to two and a half
 times longer; what it adds is a reproduction for every finding and the gaps in the tests. That is what a one-way
 door needs, and why it is not run on everything.
+
+**Security pass - only after the user says yes.** Offer it in a final review and when the change touches a security
+path (step 1), once per piece of work: not again in a repeat round, whatever the answer was. Run it without a
+question when the user asked for it. Offer it at the end of the report (step 4): why it is offered (a final review,
+or the security paths the change touches, by name) and that it is one more sub-agent. On yes, spawn one sub-agent
+with `fork_turns="none"` and the brief below, then verify its findings (step 3) and report them under **Bugs** and
+**Not confirmed**.
+
+> Look for security vulnerabilities in the changes in the repository at `<path>` since `<base>` (`git diff <base>`
+> shows them, uncommitted files included; new files: `git ls-files -o --exclude-standard`). Do not change any files.
+> Do the review yourself: do not start a review skill, a security scan or other reviewers. Read the project's rules
+> first - the instruction files Codex would load for the changed files (`AGENTS.md`, `AGENTS.override.md` and the
+> like) not already in your context, and the files they point to that cover them - and its `SECURITY.md` files, if
+> there are any, from the root down to the changed files, the nearest one winning: if they describe the threat model
+> or what the project counts as a finding, follow them. First say who can reach the changed code and what input
+> crosses a trust boundary, then check injection (SQL, command, path, template), authentication and authorization
+> bypasses, data of one user or tenant reaching another, secrets in code or logs, unsafe deserialization or eval,
+> cross-site scripting, server-side request forgery, and new or unpinned dependencies. Report only what is reachable:
+> for each finding the path from the input to the harm, file:line, how you verified it, and its level - critical,
+> high, medium or low. Number the findings. Answer in <the user's language>.
 
 **Plan check** (normal and enhanced). The plan is the one written in this session by `grill`, or named in the
 handoff file, or given by the user. No such plan, or several and none named: skip the check and say so.
@@ -163,7 +191,8 @@ The tier line, with several groups the `Groups:` line, then these four sections 
 order. This format is required: keep the tier line word for word as in step 1, keep every heading even when its section is "none", and do not fold the
 sections into one text, even where it differs from your usual style:
 
-1. **Bugs**: confirmed and unchecked ones, the most damaging first. Each: what breaks and on what input,
+1. **Bugs**: confirmed and unchecked ones, the most damaging first; a security finding is marked as such, with
+   its level. Each: what breaks and on what input,
    `file:line`, the mark from step 3.
 2. **Plan check**: missing, extra, unchecked criteria - or that it was skipped and why.
 3. **Quality notes**: briefly; the simplification step will take most of them.
@@ -172,17 +201,24 @@ sections into one text, even where it differs from your usual style:
 Then what was not covered: tests not run, platforms not checked, and that every pass was made by the same model,
 so a class of bugs it does not see stays unseen.
 
-End with one question, when there is anything to fix or simplify: fix the confirmed bugs and simplify? A finding
-that is a decision rather than a bug (a trade-off, a change of behaviour) goes to the user as its own question,
-not into the fix list.
+End with the open questions, numbered, so that one yes cannot answer two: the security pass, when it is offered (step
+2); fix the confirmed bugs and simplify, when there is anything to fix or simplify; each finding that is a decision
+rather than a bug (a trade-off, a change of behaviour), as its own question. With a yes to the security pass and to
+the fixes, the pass runs first.
 
 ## 5. After the user agrees
 
-In this order:
+A yes covers the findings the user has seen and the steps below; findings that come later, such as those of the
+security pass, are fixed after the user has seen them and said yes. In this order:
 
-1. Each confirmed bug: a failing test, the fix, the test run.
-2. Simplify what this change touched: remove duplication, abstractions that have one user, dead code and
-   leftovers of the fixes. Do not change behaviour and do not widen the diff to code the change did not touch.
+1. Each confirmed bug: a failing test that fails on the bug itself - on the wrong value, not on an import error
+   or a typo in the test - then the fix, then the test run.
+2. Simplify the code this change touched: remove duplication, abstractions that have one user, dead code and
+   leftovers of the fixes. Do not change behaviour and do not widen the diff to code the change did not touch. For
+   the text of skills, prompts and docs in the change, one sub-agent with `fork_turns="none"` does this step instead:
+   it looks for rules repeated or contradicting each other within the text, between mirrored versions and with the
+   README, rules longer than an agent needs, and instructions that make an agent do needless calls and reads; you
+   apply what it finds without changing what the rules say.
 3. The project's tests.
 4. A **repeat** review of the whole change with the same groups and the same `<base>` as the round it repeats, the
    general brief with one sentence added: the functions and files just fixed, to check together with what depends

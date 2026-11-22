@@ -8,6 +8,7 @@ import os
 import subprocess
 import sys
 import time
+import tracemalloc
 from pathlib import Path
 
 import pytest
@@ -210,6 +211,33 @@ def test_a_line_in_another_file_of_the_same_name_does_not_count() -> None:
     assert bench.mentioned(seed, "fixtures/tags.csv#L6") == [False]
     assert bench.mentioned(seed, "[tags](./notes/tags.csv#L6)") == [True]
     assert bench.mentioned(seed, "tags.csv:6") == [True]  # a bare name is the same file
+
+
+def snapshot_peak(root: Path) -> tuple[str, int]:
+    """The snapshot and the most memory it took."""
+    if tracemalloc.is_tracing():  # python -X tracemalloc: resetting the peak would spoil the caller's measurement
+        pytest.skip("tracemalloc is already on")
+    tracemalloc.start()
+    try:
+        digest = bench.snapshot(root)
+        return digest, tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+
+
+def test_the_snapshot_reads_a_file_in_pieces_not_whole(tmp_path: Path) -> None:
+    root = tmp_path / "p"
+    bench.build(None, root)
+    left = root / "left.bin"  # a large file an agent may leave: read whole, it could take all the memory
+    size = 16 << 20
+    with left.open("wb") as file:
+        file.truncate(size)  # a sparse file: no memory to make it
+    before, peak = snapshot_peak(root)
+    assert peak < size // 4, peak
+    with left.open("r+b") as file:
+        file.seek(-1, os.SEEK_END)
+        file.write(b"b")
+    assert bench.snapshot(root) != before
 
 
 def test_the_snapshot_sees_what_git_would_not_show(tmp_path: Path) -> None:

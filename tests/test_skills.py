@@ -238,11 +238,20 @@ def tool_rows(path: Path) -> dict[str, str]:
     return {line.split("|")[1].strip(): line for line in lines if line.startswith("| `")}
 
 
+def between(text: str, start: str, end: str) -> str:
+    """The part of a text from `start` up to the next `end` after it."""
+    part = text[text.index(start) :]
+    return part[: part.index(end, len(start))]
+
+
+def quoted(brief: str) -> str:
+    """A quoted brief as one text: the quote markers of its wrapped lines dropped."""
+    return brief.replace(" > ", " ")
+
+
 def review_brief(skills: Path) -> str:
     """The reviewer brief of a review skill, up to its last sentence."""
-    text = words(skills / "review" / "SKILL.md")
-    brief = text[text.index("> Review the changes in the repository") :]
-    return brief[: brief.index("Answer in")]
+    return quoted(between(words(skills / "review" / "SKILL.md"), "> Review the changes in the repository", "Answer in"))
 
 
 def test_the_hook_finds_a_plan_written_from_the_template_of_either_grill(tmp_path: Path) -> None:
@@ -394,3 +403,149 @@ def test_readmes_show_the_final_row_and_the_anchor_links() -> None:
         text = (ROOT / readme).read_text(encoding="utf-8")
         assert final in text, readme
         assert "#L" in text, readme  # the bench reads file#Lline links too
+
+
+def test_reviewers_read_the_project_rules_and_tests_fail_for_the_right_reason() -> None:
+    for skills in (CLAUDE, CODEX):
+        brief = review_brief(skills)
+        assert "the project's rules" in brief and "report a change that breaks them as a finding" in brief, skills
+        assert "fails on the bug itself" in words(skills / "review" / "SKILL.md"), skills
+        # one general rule instead of a list of file kinds that each review round found incomplete
+        assert "would load for your files" in brief, skills
+
+
+# Paragraphs both versions must say alike: the Claude text becomes the Codex text after these replacements.
+MIRRORED = (
+    ("review", "> Review the changes in the repository", "Answer in"),
+    ("review", "> Look for security vulnerabilities", "language>."),
+    ("review", "For the text of skills, prompts and docs in the change", "what the rules say."),
+    ("review", "A yes covers", "In this order:"),
+    ("grill", "**Decided before.**", "came from."),
+    ("grill", "Defaults are not hidden", "**"),
+    ("grill", "When the user changes a decision during the work", "- A defect"),
+)
+TO_CODEX = (
+    ("Claude Code would load", "Codex would load"),
+    ("(`CLAUDE.md`, `AGENTS.md`, `.claude/rules/` and the like)", "(`AGENTS.md`, `AGENTS.override.md` and the like)"),
+    ("subagent with a fresh context does this step", 'sub-agent with `fork_turns="none"` does this step'),
+    (
+        "the next question you ask or",
+        "the next question you ask (in Plan mode, where a question is one sentence, into the final message) or",
+    ),
+    ("`Not touching:` section", "`Scope:` section"),
+)
+
+
+def mirrored(skills: Path, skill: str, start: str, end: str) -> str:
+    return quoted(between(words(skills / skill / "SKILL.md"), start, end))
+
+
+def test_mirrored_paragraphs_say_the_same_in_both_versions() -> None:
+    claude = [mirrored(CLAUDE, *block) for block in MIRRORED]
+    for old, _ in TO_CODEX:
+        assert any(old in text for text in claude), old  # a replacement that matches nothing hides a drift
+    for text, block in zip(claude, MIRRORED):
+        for old, new in TO_CODEX:
+            text = text.replace(old, new)
+        assert text == mirrored(CODEX, *block), block[1]
+
+
+def test_readmes_cover_the_whole_review() -> None:
+    for readme in ("README.md", "README.ru.md"):
+        text = (ROOT / readme).read_text(encoding="utf-8")
+        assert "Security paths" in text and "SECURITY.md" in text, readme
+        assert "gtimeout" in text, readme  # the timeout command the Codex calls need
+    english = (ROOT / "README.md").read_text(encoding="utf-8")
+    review_row = tool_rows(ROOT / "README.md")["`review`"]
+    assert "final review" in review_row and "group" in review_row
+    assert "adding a delete command" in english
+    assert "These three habits" not in english  # the list has four now, and oh-my-pi gave three of them
+
+
+def test_grill_takes_only_the_users_decisions_from_accepted_plans() -> None:
+    text = words(CLAUDE / "grill" / "SKILL.md")  # the Codex text is the same: see the mirror test
+    rule = between(text, "**Decided before.**", "came from.")
+    for phrase in (
+        "`Decisions:`",
+        "`Status: done`",
+        "never from its `Taken by default, not asked` section",  # those were the agent's picks
+        "never from a plan that was dropped",
+        "translated heading",  # plans are written in the user's language, headings included
+        "from the current folder up to the root of the repository",  # as the hook looks
+        "would load for the files",  # nested rules load only when their files are read
+        "Before the first round, search once",  # not again before every question
+        "two plans disagree, ask",  # plans carry no date to tell which is newer
+    ):
+        assert phrase in rule, phrase
+    defaults = between(text, "Defaults are not hidden", "**")
+    assert "even when only one question is asked" in defaults and "into the text of the next question" in defaults
+    change = between(text, "When the user changes a decision during the work", "- A defect")
+    assert "`Decisions:`" in change and "acceptance criteria" in change and "Taken by default" in change
+    assert "`gtimeout` on macOS" in between(text, "timeout 900 node", "Show the path")
+
+
+def test_review_runs_the_security_pass_only_after_the_user_says_yes() -> None:
+    for skills, own in (
+        # Claude asks while the other checks run; headless, at the end of the report
+        (CLAUDE, ("AskUserQuestion", "is not available", "task --fresh --prompt-file .tmp/review/<run>/security.md")),
+        (CODEX, ('fork_turns="none"', "end of the report")),  # Codex does not stop mid-run to ask
+    ):
+        text = words(skills / "review" / "SKILL.md")
+        part = between(text, "**Security pass - only after the user says yes.**", "**Plan check**")
+        rule, brief = part.split("> Look for security vulnerabilities")
+        assert rule.index("Offer it") < rule.index("On yes,"), skills  # asked first, run after the answer
+        assert "once per piece of work" in rule and "not again in a repeat round" in rule, skills
+        assert "Run it without a question when the user asked for it" in rule, skills
+        assert all(phrase in rule for phrase in own), skills
+        brief = quoted(brief)
+        assert "crosses a trust boundary" in brief and "`SECURITY.md`" in brief and "if they describe" in brief
+        assert "critical, high, medium or low" in brief and "since `<base>`" in brief and "Answer in" in brief, skills
+        assert "No such list: no security paths" in between(text, "- **Security paths**", "**Final review.**"), skills
+        none = between(text, 'For tier "none"', "###")
+        assert "only the security pass may follow" in none and "step 2" in none, skills
+        questions = between(text, "End with the open questions", "## 5.")
+        assert "numbered" in questions and "the pass runs first" in questions, skills  # one yes cannot answer two
+        assert "the security pass, when it is offered" in questions, skills  # also when it was not asked before
+    # a yes given before the findings existed does not cover fixing them; the steps of the fix are part of it
+    consent = between(words(CLAUDE / "review" / "SKILL.md"), "A yes covers", "In this order:")
+    assert "the findings the user has seen and the steps below" in consent and "come later" in consent
+    review = words(CLAUDE / "review" / "SKILL.md")
+    assert "the security pass are done by a subagent" in between(review, "### When Codex is not available", "## 3.")
+
+
+def test_claude_review_briefs_live_in_a_folder_of_their_own_run() -> None:
+    text = words(CLAUDE / "review" / "SKILL.md")
+    assert text.count("mktemp -d") == 1 and text.index("mktemp -d") < text.index("--prompt-file")  # one per review
+    files = re.findall(r"--prompt-file (\S+)", text)
+    assert all(f.startswith(".tmp/review/<run>/") for f in files), files
+    assert ".tmp/review/<run>/group-<number>.md" in files  # a name with a space or a name like "security" is safe
+
+
+def test_text_is_reviewed_by_one_subagent_and_code_by_simplify() -> None:
+    fixes = between(words(CLAUDE / "review" / "SKILL.md"), "## 5.", "## Rules")  # Codex: see the mirror test
+    assert "`/simplify` (Skill tool, skill `simplify`) for the code" in fixes
+    assert "For the text of skills, prompts and docs in the change, one subagent" in fixes
+
+
+def test_readmes_name_agents_md_for_codex_and_the_project_rules() -> None:
+    for readme in ("README.md", "README.ru.md"):
+        text = (ROOT / readme).read_text(encoding="utf-8")
+        rows = [line for line in text.splitlines() if line.startswith("|")]  # the table, not a paragraph
+        row = next(line for line in rows if "`Security paths`" in line and "`AGENTS.md`" in line)
+        cells = row.split("|")
+        assert "`CLAUDE.md`" in cells[2] and "`AGENTS.md`" in cells[3], readme  # Claude Code, then Codex
+    english = words(ROOT / "README.md")
+    assert "reviewer to read the project's rules" in english
+    assert "`/code-review` checks the rules of `CLAUDE.md` itself" in english  # one group: no brief for Codex review
+    assert "and the brief reaches no one" in english  # said of an ordinary review with one group
+    for readme in ("README.md", "README.ru.md"):
+        text = (ROOT / readme).read_text(encoding="utf-8")
+        security = next(line for line in text.splitlines() if line.startswith("|") and "AskUserQuestion" in line)
+        headless = (
+            "headless"
+            if readme == "README.md"
+            else "\u0431\u0435\u0437 \u0438\u043d\u0442\u0435\u0440\u0444\u0435\u0439\u0441\u0430"
+        )  # the Russian words for it
+        assert headless in security, readme  # then the question ends the report
+        paths = between(" ".join(text.split()), "`Security paths`", ". ")
+        assert "`AGENTS.md`" in paths, readme  # read from AGENTS.md when the project has no CLAUDE.md

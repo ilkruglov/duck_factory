@@ -10,7 +10,7 @@ the result once with a depth that fits the change, and hand the work over to a f
 | Skill | When it runs | What it does |
 |---|---|---|
 | `grill` | by itself, before a non-trivial task, with or without code; or `/duck-factory:grill` | When you approved a list wholesale or the task was the agent's idea, asks first which of it to do at all; then interviews you in short rounds through the question dialog, recommended option first, and writes a one-page plan to `.tmp/plans/`. A large plan that changes code is checked by Codex before any code. |
-| `review` | by itself, after a finished code change; or `/duck-factory:review` | Measures the change (code lines, files, call sites, reversibility), picks a tier, runs the built-in `/code-review` and Codex in parallel plus a check against the plan, verifies every finding, and reports. It only finds; fixes come after you agree. |
+| `review` | by itself, after a finished code change; or `/duck-factory:review` | Measures the change (code lines, files, call sites, reversibility), picks a tier, runs the built-in `/code-review` and Codex in parallel (on a large change, a Codex and a Claude reviewer per group of files) plus a check against the plan, verifies every finding, and reports. Also as a final review of all the work before a pull request, a merge or a release; a security pass when you say yes. It only finds; fixes come after you agree. |
 | `handoff` | only on `/duck-factory:handoff` | Writes `.tmp/handoff/<slug>.md` so a fresh session can continue: goal, constraints, decisions, what is done and how it was checked, what is in flight, the next step, rollback. The file starts by telling the next session to check it against reality. |
 
 ## The pipeline
@@ -40,7 +40,9 @@ How a session goes:
 1. **Skills for the area.** If the task touches something another installed skill covers (a framework, a kind
    of system, the project's design rules), that skill is loaded first: it changes which questions are worth
    asking.
-2. **Facts first.** Anything that can be looked up in the code, configs or logs is looked up, not asked.
+2. **Facts first.** Anything that can be looked up in the code, configs or logs is looked up, not asked. A
+   decision already made - in the decisions of an earlier accepted plan, or in the project's rules - is taken from
+   there, with its source, not asked again; when two plans disagree, you are asked.
 3. **Questions in rounds**, through the question dialog: at most four per round, the most consequential first,
    two to four options each, the recommended one first. Every question carries the fact it hinges on. From the
    second round on, the last question lets you stop: "enough, take your recommendations for the rest".
@@ -106,9 +108,14 @@ The skill measures everything uncommitted (modified, staged and new files) and p
 - **Call sites**: places in code (not tests) that use a function, method or class whose behaviour or signature
   changed.
 - **One-way door**: something that cannot simply be reverted - a data migration, deleting data or files, a
-  release, an external API contract, the format of files already on disk.
-- **Critical paths**: the paths you list under a `Critical paths` heading in the project's `CLAUDE.md`, one path
-  or glob per line. A change that touches one goes to the enhanced tier. Without the list nothing is critical.
+  release, an external API contract, the format of files already on disk. It is about what applying the change does
+  to what already exists, not what a new feature lets users do later: adding a delete command is reversible code.
+- **Security paths**: the paths you list under a `Security paths` heading in the project's `CLAUDE.md` (or
+  `AGENTS.md` when it has no `CLAUDE.md`) - sign-in, permissions, payments, input from outside. They do not change
+  the tier; the review offers a security pass for them (see "Security" below). Without the list there are none.
+- **Critical paths**: the paths you list under a `Critical paths` heading in the project's `CLAUDE.md` (or
+  `AGENTS.md` when it has no `CLAUDE.md`), one path or glob per line. A change that touches one goes to the enhanced
+  tier. Without the list nothing is critical.
 
 | Tier | When | Built-in review | Codex | Plan check |
 |---|---|---|---|---|
@@ -163,16 +170,19 @@ against the code: half of them were two code paths, written in different steps, 
   the tier table, at least normal, and always runs in groups.
 - **Groups.** At the normal and enhanced tiers every changed file goes to a group: code by subsystem, each test with
   the code it tests. One group under 100 code lines or for 1-2 files, two under 500 lines, then one per three files
-  rounded up, from two to four. Briefs go to Codex as files (`--prompt-file`), never on the command line, where the shell would run
-  their backticks. Each group gets Codex (a `task`
-  with the brief below) and a fresh Claude subagent with the same brief, all in parallel; the built-in
-  `/code-review` does not run then: it takes the whole uncommitted diff, not a group and not the commits since a
-  base (with `max` it still runs, on the whole change). With one group an ordinary review stays as it was; a final
-  review always runs in groups.
-- **The brief** asks each reviewer to read its files in full, not only the changed lines; to follow every new type,
-  value, message or command across a function or module boundary to the code that consumes it, often outside the
-  change; and to check the code against the contracts of the external APIs, operating-system calls and libraries
-  it relies on. These three habits come from the reviewer of [oh-my-pi](https://github.com/can1357/oh-my-pi).
+  rounded up, from two to four. Briefs go to Codex as files (`--prompt-file`), never on the command line, where the
+  shell would run their backticks. Each group gets Codex (a `task` with the brief below) and a fresh Claude subagent
+  with the same brief, all in parallel; the built-in `/code-review` does not run then: it takes the whole uncommitted
+  diff, not a group and not the commits since a base (with `max` it still runs, on the whole change). With one group
+  an ordinary review stays as it was, and the brief reaches no one: the built-in `/code-review` checks the rules of
+  `CLAUDE.md` itself, and Codex's own review takes no brief. Each review keeps its briefs in a folder of its own, so
+  that two reviews in one worktree do not overwrite each other's.
+- **The brief** asks each reviewer to read the project's rules (the instruction files Claude Code or Codex would load
+  for its files: `CLAUDE.md`, `AGENTS.md`, `.claude/rules/` and the like) and report a change that breaks them; to
+  read its files in full, not only the changed lines; to follow every new type, value, message or command across a
+  function or module boundary to the code that consumes it, often outside the change; and to check the code against
+  the contracts of the external APIs, operating-system calls and libraries it relies on. The last three come from the
+  reviewer of [oh-my-pi](https://github.com/can1357/oh-my-pi).
 
 ### Verified findings
 
@@ -216,14 +226,44 @@ The review changes nothing but files in `.tmp/`. The tools it runs can still lea
 writes `uv.lock`), so before the report it compares `git status` with the one it started from, removes what it
 created itself and says so.
 
+### Security
+
+The reviewers above look for where the code does not do what was meant, not for how it can be made to do what was
+not meant. A separate security pass looks for that, and it runs only after you say yes. The review offers it in a
+final review and when the change touches a security path (see above), even when the change there has no code lines;
+you can also ask for it at any review, and then it runs without a question. It is offered once per piece of work, not
+again in a repeat round. In Claude Code the question comes right after the other checks start, so the pass runs
+alongside them. Without the question dialog (a headless run, and always in Codex) it comes at the end of the report,
+numbered apart from the question about fixes, and the pass starts only after your answer; with a yes to both, it runs
+first.
+
+The pass is one more reviewer - a Codex task, or a fresh Claude subagent without Codex - with its own brief. It
+reads the project's rules and its `SECURITY.md` files, if any (the nearest to the changed file wins), and follows
+them where they describe the threat model or what counts as a finding. It says who
+can reach the changed code and what input crosses a trust boundary; then checks injection, broken authentication
+or authorization, data of one user reaching another, secrets in code or logs, unsafe deserialization, XSS, SSRF,
+new or unpinned dependencies. Only reachable findings, each with the path from the input to the harm and a level:
+critical, high, medium or low. They go into the bugs of the report, marked as security.
+
+Security scanners are not part of the review. In our runs (November 2026) the scan of changes in OpenAI's Codex
+Security plugin refused to start three times out of three, a headless `codex exec` run included; Claude Security
+from Anthropic scans only committed changes and asks its own question about the cost. In the last failed run Codex
+reviewed the 12 changed files itself instead: 77 seconds in all, two findings (medium and low).
+
 ### After you agree
 
-A failing test, the fix and a test run for each confirmed bug; then `/simplify`; then the project's tests; then
-a repeat review of the whole change at the light tier, aimed at the functions and files just fixed (after a grouped or final
+A failing test that fails on the bug itself (not on an import error or a typo), the fix and a test run for each
+confirmed bug; then `/simplify` for the code, and for the text of skills, prompts or docs one subagent instead,
+looking for rules repeated or contradicting each other (also between the two versions and the README), rules longer
+than an agent needs, and instructions that make an agent do needless calls; then the project's tests; then a repeat
+review of the whole change at the light tier, aimed at the functions and files just fixed (after a grouped or final
 round: the same groups and base). Findings the previous round already reported are dropped, except one a fix was
-meant to remove and that is still there. If two rounds in a row find only edge cases in the same place, the
-skill stops and asks you whether to simplify the approach or accept the limits - in plain words: what keeps going
-wrong, with an example, and for each option what you get and what you lose.
+meant to remove and that is still there. If two rounds in a row find only edge cases in the same place, the skill
+stops and asks you whether to simplify the approach or accept the limits - in plain words: what keeps going wrong,
+with an example, and for each option what you get and what you lose.
+
+A yes covers only the findings you have seen: findings that come later, such as those of the security pass, are fixed
+after you have seen them and said yes.
 
 ### Without Codex
 
@@ -236,7 +276,8 @@ you say it is back.
 
 From runs on the three benchmark diffs with an Opus-class model: a light review took 2 to 2.5 minutes and about
 $0.70 to $1.00, a normal one about 5 minutes and $1.40. The checks themselves take 1.5 to 2 minutes; the rest is
-reproducing the findings.
+reproducing the findings. A review in groups takes longer: on a 190-line change in two groups the Codex reviewers
+took 4.5 to 5 minutes and the Claude subagents 9 to 14 (one run).
 
 ## handoff
 
@@ -341,8 +382,9 @@ What differs from the Claude Code version:
 | Domain skills in `grill` | loaded with the Skill tool | their `SKILL.md` is read |
 | Plan check in `grill` | Codex, read-only | a sub-agent with a fresh context |
 | Simplification after fixes | `/simplify` | a step inside the skill |
+| The security pass, after your yes | a Codex task (without Codex, a subagent), asked about with AskUserQuestion while the other checks run; in a headless run, at the end of the report | a sub-agent, asked about at the end of the report |
 | `handoff` is manual through | `disable-model-invocation` | `agents/openai.yaml`, `allow_implicit_invocation: false` |
-| Critical paths are listed in | the project's `CLAUDE.md` | the project's `AGENTS.md` |
+| `Critical paths` and `Security paths` are listed in | the project's `CLAUDE.md` | the project's `AGENTS.md` |
 | The plan after a compaction | brought back by the hooks | the skill's instruction to re-read the plan with `Status: active`; no hooks |
 
 Why one pass and not two in the enhanced tier. On two benchmarks (three seeded bugs in a 581-line diff, four
@@ -380,6 +422,7 @@ start the whole skill.
   works with Claude only. Codex runs the model and reasoning effort from its own configuration:
   `~/.codex/config.toml`, a trusted project's `.codex/config.toml`, and `review_model` for its native review.
 - `python3` 3.9 or later on PATH: it runs the hooks.
+- `timeout` from coreutils (`gtimeout` on macOS): every Codex call runs under it.
 - Projects keep `.tmp/` in `.gitignore`: plans, handoff files and reproduction scripts go there.
 
 ## Install
@@ -407,6 +450,8 @@ The skills are plain Markdown; after an edit bump the version and reinstall, or 
 - **Where plans and handoff files go**: `.tmp/plans/` and `.tmp/handoff/` in the same two skills, in
   `skills/handoff/SKILL.md` and in `scripts/context_hooks.py`.
 - **Critical paths** of a project: a `Critical paths` heading in its `CLAUDE.md` (`AGENTS.md` for Codex).
+- **Security paths** of a project: a `Security paths` heading in the same file; what counts as a security
+  finding there: its `SECURITY.md`.
 
 ## Evals
 
@@ -459,6 +504,8 @@ A new version loads in the next Claude Code session.
 - `review` counts lines without indentation changes, so a change that mixes re-indented lines with real edits can
   be counted smaller than it is and get the lighter tier. The reviewers still read the whole diff; only the depth
   is chosen from the count.
+- The tests of the skills check that each rule is in the text, not that it is worded right; what a rule makes an
+  agent do is checked by the reviews and the bench.
 
 ## Credits
 
