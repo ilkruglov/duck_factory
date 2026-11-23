@@ -383,7 +383,7 @@ def test_second_round_fixes_in_the_skills() -> None:
     assert "CODEX_ROOT=" not in claude  # the command prints the path, the agent puts it into every command
     launch = 'node "<CODEX_ROOT>/scripts/codex-companion.mjs"'
     assert claude.count(launch) == claude.count("timeout 900 " + launch) > 0  # every Codex command has its limit
-    assert "in single quotes" in claude  # the focus of a repeat: no backticks, no $
+    assert "in single quotes" in claude  # the focus of an enhanced review: no backticks, no $
     assert "$CODEX_ROOT" not in words(CLAUDE / "grill" / "SKILL.md")
     assert "all the changed files" in words(CODEX / "review" / "SKILL.md")
 
@@ -420,6 +420,12 @@ MIRRORED = (
     ("review", "> Look for security vulnerabilities", "language>."),
     ("review", "For the text of skills, prompts and docs in the change", "what the rules say."),
     ("review", "A yes covers", "In this order:"),
+    ("review", "> Check the fixes just made", "Answer in"),
+    ("review", "1. Each confirmed bug", "3. A **repeat**"),
+    ("review", "If two rounds in a row find only edge cases", "Do not fix in circles."),
+    ("review", "For each confirmed bug, check the places", "whether the bug is there too."),
+    ("review", "When a round leaves nothing left to fix", "once for the whole work:"),
+    ("grill", "**Finished work first.**", "commit after leaving it."),
     ("grill", "**Decided before.**", "came from."),
     ("grill", "Defaults are not hidden", "**"),
     ("grill", "When the user changes a decision during the work", "- A defect"),
@@ -460,6 +466,7 @@ def test_readmes_cover_the_whole_review() -> None:
     assert "final review" in review_row and "group" in review_row
     assert "adding a delete command" in english
     assert "These three habits" not in english  # the list has four now, and oh-my-pi gave three of them
+    assert "already reported and you already decided on are dropped" in words(ROOT / "README.md")
 
 
 def test_grill_takes_only_the_users_decisions_from_accepted_plans() -> None:
@@ -549,3 +556,47 @@ def test_readmes_name_agents_md_for_codex_and_the_project_rules() -> None:
         assert headless in security, readme  # then the question ends the report
         paths = between(" ".join(text.split()), "`Security paths`", ". ")
         assert "`AGENTS.md`" in paths, readme  # read from AGENTS.md when the project has no CLAUDE.md
+
+
+def test_a_repeat_checks_only_the_fixes_and_simplify_runs_once() -> None:
+    for skills in (CLAUDE, CODEX):  # what differs between the versions; the shared paragraphs: the mirror test
+        text = words(skills / "review" / "SKILL.md")
+        fixes = between(text, "## 5.", "## Rules")
+        assert "in one group" in fixes and "where something was fixed" in fixes, skills
+        assert "outside the change" in fixes and "number 1" in fixes, skills  # every fixed place has a reviewer
+        assert "its text before and after" in fixes, skills  # what a check of a simplification needs
+        rows = (skills / "review" / "SKILL.md").read_text(encoding="utf-8").splitlines()
+        assert "repeat brief" in next(line for line in rows if line.startswith("| repeat |")), skills
+    text = words(CLAUDE / "review" / "SKILL.md")
+    fixes = between(text, "## 5.", "## Rules")
+    for phrase in (
+        "list of the fixed places",  # the agent knows them; a git snapshot missed new files
+        "the places the report named",  # a yes covers what the user saw
+        "goes to the user first",
+        "tests of the module",
+        "full test suite once",  # one full run per round
+        "once for the whole work",  # simplify at the end only
+        "nothing left to fix",
+        "After the third repeat round",
+        "real bugs each round brought",
+    ):
+        assert phrase in fixes, phrase
+    verify = between(text, "## 3.", "## 4.")
+    assert "where the same logic repeats" in verify and "name those places with the finding" in verify
+    brief = mirrored(CLAUDE, "review", "> Check the fixes just made", "Answer in")
+    assert "Do not review the rest of the change again" in brief and "the code that calls it" in brief
+    assert "would fail without it" in brief and "the files they point to" in brief
+    assert "behaviour stayed the same" in brief  # a simplification has no bug to remove
+    repeat = between(fixes, "3. A **repeat**", "When a round leaves")
+    assert "repeat-<group number>.md" in repeat and "in the background" in repeat  # one file per group
+    assert "task --fresh --prompt-file .tmp/review/<run>/simplify.md" in fixes  # never the brief on the command line
+    assert "a Claude subagent with a fresh context" in between(fixes, "5. The project's tests", "The repeat brief")
+    assert "same reviewers per group" not in text  # no full review of every group after a fix
+    codex = between(words(CODEX / "review" / "SKILL.md"), "## 5.", "## Rules")
+    assert codex.count('fork_turns="none"') >= 3  # every sub-agent of the step reads without the conversation
+
+
+def test_grill_asks_to_commit_finished_work_before_a_new_task() -> None:
+    rule = mirrored(CLAUDE, "grill", "**Finished work first.**", "commit after leaving it.")  # Codex: the mirror test
+    assert "`git status`" in rule and "`Status: done`" in rule and "only on the user's command" in rule
+    assert "also when the interview is skipped" in rule and "in a git repository" in rule and "plan mode" in rule

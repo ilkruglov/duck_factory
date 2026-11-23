@@ -18,8 +18,8 @@ the result once with a depth that fits the change, and hand the work over to a f
 1. `grill` loads the skills for the area, settles the decisions and writes the plan with acceptance criteria.
 2. You approve the plan; the work goes test first.
 3. `review` runs once, before the report or a commit.
-4. After you agree: a failing test and a fix for each confirmed bug, `/simplify`, the tests, and a repeat review
-   aimed at the fixed places.
+4. After you agree: a failing test and a fix for each confirmed bug, the tests, and a short repeat review of the
+   fixes only; `/simplify` once, at the end.
 5. `handoff` when the work continues in another session.
 
 Nothing here replaces your approval: `grill` changes nothing until you confirm, the plan is not consent to start
@@ -27,9 +27,11 @@ the work, and `review` never edits files.
 
 ## grill
 
-Runs before a task that is not trivial: a new feature or module, a choice between approaches, a change in
-several places, work without code that takes more than a few steps (research, a document, a setup), an unclear
-goal. For a bug fix or a small clear edit it says the task is clear and steps aside.
+Runs before a task that is not trivial: a new feature or module, a choice between approaches, a change in several
+places, work without code that takes more than a few steps (research, a document, a setup), an unclear goal. For a
+bug fix or a small clear edit it says the task is clear and steps aside. Either way, in a git repository it first
+looks at `git status`: if accepted work of another task is not committed yet, it asks whether to commit it, so that
+the ordinary review of the new task reads only the new change (in a plan mode the commit waits until the mode ends).
 
 How a session goes:
 
@@ -124,7 +126,7 @@ The skill measures everything uncommitted (modified, staged and new files) and p
 | normal | everything else | `medium` | review | yes |
 | enhanced | a one-way door, a critical path, over 10 files, over 20 call sites, or you asked | `high` | adversarial, with a focus | yes |
 | final | a final review (below): the tier of the whole change, at least normal | - | per group | yes |
-| repeat | after fixes | `low` aimed at the fixes (`medium` after a one-way door) | adversarial, aimed at the fixes | no |
+| repeat | after fixes | - | a short brief on the fixes only, Codex and a Claude subagent (below) | no |
 
 A one-way door outweighs the other signs; `max` only when you ask for it by name. The tier comes from the table
 and nothing else: "this is the core of the system" does not raise it - that is what the list of critical paths
@@ -252,15 +254,26 @@ reviewed the 12 changed files itself instead: 77 seconds in all, two findings (m
 
 ### After you agree
 
-A failing test that fails on the bug itself (not on an import error or a typo), the fix and a test run for each
-confirmed bug; then `/simplify` for the code, and for the text of skills, prompts or docs one subagent instead,
-looking for rules repeated or contradicting each other (also between the two versions and the README), rules longer
-than an agent needs, and instructions that make an agent do needless calls; then the project's tests; then a repeat
-review of the whole change at the light tier, aimed at the functions and files just fixed (after a grouped or final
-round: the same groups and base). Findings the previous round already reported are dropped, except one a fix was
-meant to remove and that is still there. If two rounds in a row find only edge cases in the same place, the skill
-stops and asks you whether to simplify the approach or accept the limits - in plain words: what keeps going wrong,
-with an example, and for each option what you get and what you lose.
+Each round goes like this. For each confirmed bug: a failing test that fails on the bug itself (not on an import
+error or a typo), the fix and the tests of that place; a yes covers the places the report named for the finding - the
+report names where the same logic repeats, such as the other version of a mirrored file - and the same bug found
+anywhere else goes to you first; then the project's full test suite once; then a repeat review of the fixes only. The
+agent keeps the list of fixed places, and the repeat has its own short brief: those places, the code that calls them,
+the code they call and their tests - not the whole change again. In Claude Code it is one Codex task and one Claude
+subagent for all the fixes (without Codex, the subagent alone); when the fixes are in several groups, that pair goes
+to every group where something was fixed. In Codex it is one sub-agent the same way.
+
+When a round leaves nothing to fix, or you accept what is left, the work ends once: `/simplify` for the code, and for
+the text of skills, prompts or docs one subagent instead, looking for rules repeated or contradicting each other
+(also between the two versions and the README), rules longer than an agent needs, and instructions that make an agent
+do needless calls; then the tests and one repeat review of what the simplification changed, checking that the
+behaviour stayed the same.
+
+Findings the previous round already reported and you already decided on are dropped, except one a fix was meant to
+remove and that is still there. If two rounds in a row find only edge cases in the same place, the skill stops and
+asks you whether to simplify the approach or accept the limits. After the third repeat round it stops and asks in any
+case: go on, simplify the approach or accept what is left, with how many real bugs each round brought. It asks in
+plain words: what keeps going wrong, with an example, and for each option what you get and what you lose.
 
 A yes covers only the findings you have seen: findings that come later, such as those of the security pass, are fixed
 after you have seen them and said yes.
@@ -381,7 +394,7 @@ What differs from the Claude Code version:
 | The boundary of the work in the plan | a `Not touching` section | a `Scope` section: what the work covers (the Codex model does not write what stays unchanged) |
 | Domain skills in `grill` | loaded with the Skill tool | their `SKILL.md` is read |
 | Plan check in `grill` | Codex, read-only | a sub-agent with a fresh context |
-| Simplification after fixes | `/simplify` | a step inside the skill |
+| Simplification, once at the end | `/simplify` | a step inside the skill |
 | The security pass, after your yes | a Codex task (without Codex, a subagent), asked about with AskUserQuestion while the other checks run; in a headless run, at the end of the report | a sub-agent, asked about at the end of the report |
 | `handoff` is manual through | `disable-model-invocation` | `agents/openai.yaml`, `allow_implicit_invocation: false` |
 | `Critical paths` and `Security paths` are listed in | the project's `CLAUDE.md` | the project's `AGENTS.md` |

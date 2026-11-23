@@ -14,6 +14,11 @@ the plan, its headings included. Only "(Recommended)" stays as is.
 
 ## First: is it needed, and whose task is it?
 
+**Finished work first.** Before anything else - also when the interview is skipped - in a git repository look at
+`git status`. If the working tree holds the work of another task that the user has accepted but not committed - its
+plan says `Status: done`, or the user said so - first ask whether to commit it: otherwise the review of the new task
+reads both. Commit only on the user's command; in a plan mode that forbids changes, commit after leaving it.
+
 You may have started this on your own. If the task is already clear - goal, what not to touch and how to check
 the result are all known - say so in one line and skip the interview; write the plan only if the change is large.
 If only one thing is unclear, ask that one question instead of a full interview.

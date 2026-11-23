@@ -64,7 +64,7 @@ steps meet shows only when both are in view.
 | normal | everything else | general | yes |
 | enhanced | a one-way door, or a critical path, or over 10 files, or over 20 call sites, or the user asked | adversarial, instead of general | yes |
 | final | a final review (step 1): the tier the table gives for the whole change, at least normal | general or adversarial, per group | yes |
-| repeat | after fixes from the previous round | general, aimed (see step 5) | no |
+| repeat | after fixes from the previous round | the repeat brief (step 5) | no |
 
 A one-way door outweighs every other sign. In doubt between two tiers, take the higher.
 
@@ -181,9 +181,10 @@ claims a bug:
 - where it is cheap, reproduce it: run the sub-agent's reproduction, or a short script of your own - in memory
   or in `.tmp/` of the project. Do not edit project files for this.
 
-Mark each one: **confirmed** (how: the command and its result, or the lines that prove it), **not confirmed**
-(why), or **not checked** (why not). Findings about style or simplification need no proof; keep them apart from
-bugs.
+Mark each one: **confirmed** (how: the command and its result, or the lines that prove it), **not confirmed** (why),
+or **not checked** (why not). Findings about style or simplification need no proof; keep them apart from bugs. For
+each confirmed bug, check the places where the same logic repeats - a mirrored version, another call path - and name
+those places with the finding, saying whether the bug is there too.
 
 ## 4. Report
 
@@ -193,7 +194,7 @@ sections into one text, even where it differs from your usual style:
 
 1. **Bugs**: confirmed and unchecked ones, the most damaging first; a security finding is marked as such, with
    its level. Each: what breaks and on what input,
-   `file:line`, the mark from step 3.
+   `file:line` and the places where the same logic repeats, the mark from step 3.
 2. **Plan check**: missing, extra, unchecked criteria - or that it was skipped and why.
 3. **Quality notes**: briefly; the simplification step will take most of them.
 4. **Not confirmed**: one line each, so the user can disagree.
@@ -211,23 +212,46 @@ the fixes, the pass runs first.
 A yes covers the findings the user has seen and the steps below; findings that come later, such as those of the
 security pass, are fixed after the user has seen them and said yes. In this order:
 
-1. Each confirmed bug: a failing test that fails on the bug itself - on the wrong value, not on an import error
-   or a typo in the test - then the fix, then the test run.
-2. Simplify the code this change touched: remove duplication, abstractions that have one user, dead code and
+1. Each confirmed bug: a failing test that fails on the bug itself - on the wrong value, not on an import error or a
+   typo in the test - then the fix, then that test and the tests of the module it is in. The same yes covers the
+   places the report named for it; the same bug anywhere else goes to the user first. Keep the list of the fixed
+   places: file:line and what was fixed.
+2. The project's full test suite once, after all the fixes of the round.
+3. A **repeat** review of the fixes with the repeat brief below: one sub-agent with `fork_turns="none"` for each
+   group where something was fixed (step 1, "Groups"), with that group's places - all of them when they are in one
+   group. A fixed place outside the change goes with the group of the code it belongs to, or the nearest one; with no
+   groups (the light tier) all the places are one group, number 1. Drop findings the previous round already reported
+   and the user already decided on - except one the fix was meant to remove: if it is still there, it is a bug again.
+
+When a round leaves nothing left to fix, or the user accepts what is left as limits, the work ends with these two
+steps, once for the whole work:
+
+4. Simplify the code this change touched: remove duplication, abstractions that have one user, dead code and
    leftovers of the fixes. Do not change behaviour and do not widen the diff to code the change did not touch. For
    the text of skills, prompts and docs in the change, one sub-agent with `fork_turns="none"` does this step instead:
    it looks for rules repeated or contradicting each other within the text, between mirrored versions and with the
    README, rules longer than an agent needs, and instructions that make an agent do needless calls and reads; you
-   apply what it finds without changing what the rules say.
-3. The project's tests.
-4. A **repeat** review of the whole change with the same groups and the same `<base>` as the round it repeats, the
-   general brief with one sentence added: the functions and files just fixed, to check together with what depends
-   on them; new files the fixes added join the group of the code they belong to. If the original change was a
-   one-way door, use the adversarial brief instead. Drop findings the previous round already reported and the user
-   already decided on - except one the fix was meant to remove: if it is still there, it is a bug again.
+   apply what it finds without changing what the rules say. Keep the list of the places this step changed, each with
+   its text before and after, taken from your edits.
+5. The project's tests, then one sub-agent with `fork_turns="none"` and the repeat brief for the places the
+   simplification changed, with their text before and after and the bracketed check.
 
-If two rounds in a row find only edge cases in the same place, stop and ask the user: simplify the approach or
-accept the limits. Do not fix in circles.
+The repeat brief:
+
+> Check the fixes just made in the repository at `<path>`. The fixed places:
+> `<file:line - what was fixed, one per line>`. Do not change any files. Do the review yourself: do not start a
+> review skill or other reviewers. Read the project's rules first - the instruction files Codex would load for the
+> fixed files (`AGENTS.md`, `AGENTS.override.md` and the like) not already in your context, and the files they point
+> to that cover them - and report a fix that breaks them. For each fixed place read the fix, the code that calls it,
+> the code it calls and its tests: check that the fix removes the bug, that nothing that uses it breaks, and that its
+> test would fail without it.
+> `<After a simplification: check instead that the behaviour stayed the same and nothing that uses it breaks.>` Do
+> not review the rest of the change again. Report each bug separately: what breaks and on what input, file:line, and
+> how you verified it. Number the findings. Answer in <the user's language>.
+
+If two rounds in a row find only edge cases in the same place, stop and ask the user: simplify the approach or accept
+the limits. After the third repeat round, stop and ask in any case: go on, simplify the approach, or accept what is
+left; say how many real bugs each round brought. Do not fix in circles.
 
 Ask it in plain words, for someone who has not read the diff and does not know the review's terms. First what
 keeps going wrong, in one sentence with an example of an input. Then the options, and for each one what they get
