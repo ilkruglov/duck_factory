@@ -39,11 +39,11 @@ def test_every_codex_skill_has_ui_metadata_and_handoff_is_manual() -> None:
     assert "disable-model-invocation: true" in (CLAUDE / "handoff" / "SKILL.md").read_text()
 
 
-def test_repository_is_english_only_except_the_russian_readme() -> None:
+def test_repository_is_english_only_except_the_russian_readme_and_changelog() -> None:
     files = subprocess.run(["git", "ls-files"], cwd=ROOT, capture_output=True, text=True, check=True).stdout.split()
     for name in files:
         text = (ROOT / name).read_text(encoding="utf-8")
-        assert name == "README.ru.md" or not re.search("[\u0400-\u04ff]", text), name
+        assert name in ("README.ru.md", "CHANGELOG.ru.md") or not re.search("[\u0400-\u04ff]", text), name
 
 
 def test_the_russian_readme_has_the_sections_and_commands_of_the_english_one() -> None:
@@ -600,3 +600,45 @@ def test_grill_asks_to_commit_finished_work_before_a_new_task() -> None:
     rule = mirrored(CLAUDE, "grill", "**Finished work first.**", "commit after leaving it.")  # Codex: the mirror test
     assert "`git status`" in rule and "`Status: done`" in rule and "only on the user's command" in rule
     assert "also when the interview is skipped" in rule and "in a git repository" in rule and "plan mode" in rule
+
+
+def changelog_entries(text: str) -> list[tuple[str, str]]:
+    """Each entry of a changelog as (heading, body)."""
+    parts = re.split(r"^## ", text, flags=re.MULTILINE)[1:]
+    return [(part.split("\n", 1)[0], part.split("\n", 1)[1]) for part in parts]
+
+
+def changelog_check(english: str, russian: str, versions: list[str], marketplace: str) -> None:
+    entries = changelog_entries(english)
+    assert [h for h, _ in entries] == [h for h, _ in changelog_entries(russian)]  # same versions and dates
+    for heading, body in entries + changelog_entries(russian):
+        assert re.fullmatch(r"\d+\.\d+\.\d+ - \d{4}-\d{2}-\d{2}", heading), heading
+        assert "\n- " in "\n" + body, heading  # an entry says what changed
+    listed = [h.split(" ")[0] for h, _ in entries]
+    assert all(version in listed for version in versions), versions  # each plugin's version has its entry
+    newest = max(versions, key=lambda v: tuple(int(n) for n in v.split(".")))
+    assert listed[0] == newest, listed[0]  # on top; one plugin may stay behind, as in 0.2.1
+    assert marketplace == versions[0], marketplace  # the Claude Code marketplace lists the Claude Code plugin
+
+
+def test_the_changelog_has_the_version_of_both_plugins_in_both_languages() -> None:
+    manifests = (CLAUDE.parent / ".claude-plugin" / "plugin.json", CODEX.parent / ".codex-plugin" / "plugin.json")
+    versions = [json.loads(m.read_text(encoding="utf-8"))["version"] for m in manifests]
+    market = json.loads((ROOT / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8"))
+    english, russian = ((ROOT / n).read_text(encoding="utf-8") for n in ("CHANGELOG.md", "CHANGELOG.ru.md"))
+    changelog_check(english, russian, versions, market["plugins"][0]["version"])
+
+
+def test_the_changelog_check_takes_a_release_of_one_plugin_and_rejects_gaps() -> None:
+    english, russian = ((ROOT / n).read_text(encoding="utf-8") for n in ("CHANGELOG.md", "CHANGELOG.ru.md"))
+    at_021 = [text[text.index("## 0.2.1") :] for text in (english, russian)]  # the changelog as it stood at 0.2.1
+    changelog_check(*at_021, ["0.2.1", "0.2.0"], "0.2.1")  # Claude Code ahead of Codex
+    with pytest.raises(AssertionError):
+        changelog_check(english, russian, ["0.4.2", "0.4.2"], "0.4.2")  # a bump without an entry
+    with pytest.raises(AssertionError):
+        changelog_check(
+            english, russian.replace("## 0.4.1 - 2026-11-23", "## 0.4.1 - 2026-11-21"), ["0.4.1"] * 2, "0.4.1"
+        )
+    empty = "## 0.4.2 - 2026-11-24\n\n"
+    with pytest.raises(AssertionError):
+        changelog_check(empty + english, empty + russian, ["0.4.2", "0.4.2"], "0.4.2")

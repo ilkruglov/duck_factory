@@ -1,7 +1,7 @@
 # duck_factory
 
 Плагин для Claude Code и для Codex CLI (`duck-factory`). Ниже описана версия для Claude Code; чем отличается
-версия для Codex — в разделе [Codex](#codex). English: [README.md](README.md).
+версия для Codex — в разделе [Codex](#codex). English: [README.md](README.md). Изменения по версиям: [CHANGELOG.ru.md](CHANGELOG.ru.md).
 
 Три навыка, из которых складывается небольшой конвейер разработки: договориться о задаче до начала, один раз
 проверить результат с глубиной под размер правки и передать работу в новую сессию. Два [хука](#хуки) берегут

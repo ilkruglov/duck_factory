@@ -1,7 +1,7 @@
 # duck_factory
 
 A plugin for Claude Code and for Codex CLI (`duck-factory`). The sections below describe the Claude Code
-version; [Codex](#codex) lists what differs. In Russian: [README.ru.md](README.ru.md).
+version; [Codex](#codex) lists what differs. In Russian: [README.ru.md](README.ru.md). Changes by version: [CHANGELOG.md](CHANGELOG.md).
 
 Three skills that make a small development pipeline for Claude Code: agree on the task before starting, review
 the result once with a depth that fits the change, and hand the work over to a fresh session. Two
