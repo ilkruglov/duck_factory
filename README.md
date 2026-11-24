@@ -152,14 +152,18 @@ known from later fixes; every finding was then checked against the code, and the
 ones (a crash, a broken function, lost or wrong data, money, privacy) and minor ones. One run per variant, 22
 important bugs in all:
 
-| Reviewers | Important bugs found | Claude tokens |
-|---|---|---|
-| Codex with the brief + its adversarial review + built-in `high` | 19 | 12.4M |
-| Codex with the brief + a Claude subagent per group (the earlier setup) | 18 | 81.5M |
-| Codex's own review + built-in `medium` (the earlier setup for one group) | 12 | 6.4M |
-| Codex with the brief alone | 15 | - |
-| Codex's own review alone | 10 | - |
-| Codex's adversarial review alone | 8 | - |
+| Reviewers | Important bugs found | Claude tokens | Codex tokens |
+|---|---|---|---|
+| Codex with the brief + its adversarial review + built-in `high` | 19 | 12.4M | 13.7M + the adversarial review |
+| Codex with the brief + a Claude subagent per group (the earlier setup) | 18 | 81.5M | 13.7M |
+| Codex's own review + built-in `medium` (the earlier setup for one group) | 12 | 6.4M | 8.7M |
+| Codex with the brief alone | 15 | - | 13.7M |
+| Codex's own review alone | 10 | - | 8.7M |
+| Codex's adversarial review alone | 8 | - | not recorded |
+
+Tokens are counted with cache reads, for both changes together. Codex's come from its session logs
+(`total_token_usage`); without cache reads its brief used 0.58M and its own review 0.37M. The plugin runs the
+adversarial review as a temporary session and keeps no count of it. Codex spends its own subscription, not Claude's.
 
 The Claude subagents per group found more minor bugs (16 against 9 of 22) at six and a half times the tokens, so
 they stay for the final review only. The adversarial review alone is the weakest, but it found an ordering bug no
@@ -293,7 +297,7 @@ repeated or contradicting each other (also between the two versions and the READ
 needs and needless calls. The agent drops from Codex's list what is only taste and what changes behaviour or touches
 code outside the change, and applies the rest with its own; then the tests and one repeat review of what the
 simplification changed, checking that the behaviour stayed the same. In Codex the agent does it alone. On two
-finished, reviewed changes Codex found 23 real simplifications without Claude tokens, a Claude agent with the same
+finished, reviewed changes Codex found 23 real simplifications without Claude tokens (4.4M of its own, 0.26M without cache reads), a Claude agent with the same
 directions 14, the two together 31 of 37; `/simplify` found 17 for four times the Claude tokens of the agent
 (65M against 14M, cache reads included) and in one of the two changed behaviour.
 
