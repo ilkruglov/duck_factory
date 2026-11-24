@@ -5,6 +5,16 @@ Codex (`plugins/duck-factory-codex`) - carry the same version since 0.2.0, excep
 Code plugin only. The commit messages hold the measurements and the reasons in full. Russian:
 [CHANGELOG.ru.md](CHANGELOG.ru.md).
 
+## 0.4.3 - 2026-11-24
+
+- `grill` writes the full one-page plan only when the work changes program code: a hook, a service, a script in
+  the repository, CI, a config, prompt or data file the code reads. For a skill, a prompt the project's code does
+  not read, a document, slides, research or a setup - also with tests next to them -
+  it writes a short record instead: the decisions, a default marked as such, the steps and the acceptance criteria,
+  each with its check. The confirmation shows the record itself and the user's yes starts the work. The owner
+  objected three times to a full plan for slides and skills; the short record still comes back after a compaction,
+  and the final report goes through its criteria. Defaults marked in a record are never taken as earlier decisions.
+
 ## 0.4.2 - 2026-11-24
 
 - In Claude Code, `review` runs a new set of reviewers, chosen on a measurement on two real changes with 22 important

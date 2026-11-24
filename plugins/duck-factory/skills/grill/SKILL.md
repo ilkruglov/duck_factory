@@ -1,6 +1,6 @@
 ---
 name: grill
-description: Use BEFORE starting any non-trivial task - a new feature or module, a choice between approaches, a change across several places, work without code that takes more than a few steps (research, a document, a setup), or any request whose goal, scope or acceptance check is unclear. Interviews the user in short rounds through the AskUserQuestion dialog, recommended option first, until every decision is settled, then writes a one-page plan to .tmp/plans/. Not for bug fixes, small clear edits, or questions that only need an answer.
+description: Use BEFORE starting any non-trivial task - a new feature or module, a choice between approaches, a change across several places, work without code that takes more than a few steps (research, a document, a setup), or any request whose goal, scope or acceptance check is unclear. Interviews the user in short rounds through the AskUserQuestion dialog, recommended option first, until every decision is settled, then writes the plan to .tmp/plans/: a one-page plan when the work changes code, else a short record of the decisions, steps and acceptance criteria. Not for bug fixes, small clear edits, or questions that only need an answer.
 argument-hint: "What are we planning?"
 ---
 
@@ -20,7 +20,7 @@ plan says `Status: done`, or the user said so - first ask whether to commit it: 
 reads both. Commit only on the user's command; in a plan mode that forbids changes, commit after leaving it.
 
 You may have started this on your own. If the task is already clear - goal, what not to touch and how to check
-the result are all known - say so in one line and skip the interview; write the plan only if the change is large.
+the result are all known - say so in one line and skip the interview; still write the record that "The plan" gives it and confirm it as below.
 If only one thing is unclear, ask that one question instead of a full interview.
 
 **Settle what to do before how.** The first round asks only about scope - whether to do it at all, and for
@@ -47,7 +47,7 @@ them covers - the framework or service in use, the kind of system being designed
 domain rules - call the Skill tool for it now, before the interview. Several areas mean several skills.
 
 A domain skill changes which questions are worth asking and what the plan must contain, so loading it after the
-plan is written is too late. Name the skills you loaded in the plan. If none fits, go on without one; do not load
+plan is written is too late. Name the skills you loaded in the full plan. If none fits, go on without one; do not load
 a skill only because its name looks close.
 
 ## The interview
@@ -68,8 +68,9 @@ from the current folder up to the root of the repository (outside a repository, 
 project's rules: the instruction files Claude Code would load for the files this task touches (`CLAUDE.md`,
 `AGENTS.md`, `.claude/rules/` and the like) not already in your context, and the files they point to that cover those
 files. From a plan, take a decision only from the `Decisions:` section of a plan with `Status: done`, never from its
-`Taken by default, not asked` section (those were your own picks) and never from a plan that was dropped. Plans are
-written in the user's language, so look for these sections under a translated heading too; only the `Status:` line is
+`Taken by default, not asked` section, never from a line marked (by default) - both were your own picks - and never
+from a plan that was dropped. Plans are
+written in the user's language, so look for these headings and the (by default) mark in translation too; only the `Status:` line is
 always in English. When two plans disagree, ask the user which one holds, quoting both. If nothing the decision
 rested on has changed, it is a default like any other, shown with the plan or file it came from.
 
@@ -95,14 +96,22 @@ Each round reshapes the tree: settled decisions push the frontier outward; recom
 the next call follows in the same turn, start its first question with one line on what the last round settled.
 
 The interview is done when the frontier is empty or the user chose "enough". Confirm with one more
-AskUserQuestion whose question text itself holds the summary: the decisions made and the defaults taken, a line
-each. Options: write the plan, or change something. Until the user confirms, change nothing.
+AskUserQuestion whose question text itself holds the summary. For work that changes program code ("The plan") the
+summary is the decisions made and the defaults taken, a line each, and the options are: write the plan, or change
+something. For work without code the summary is the short record itself, and the options are: start, or change
+something. Until the user confirms, change nothing.
 
 ## The plan
 
-After the confirmation, write the plan to `.tmp/plans/<short-slug>.md` in the project (create the directory if
-needed; `.tmp/` must be in `.gitignore` - if it is not, say so instead of editing `.gitignore`). One page at most,
-with these sections:
+Which form depends on whether the work changes program code: code that runs, such as a hook, a service, a script
+in the repository or a CI workflow, and a config, prompt or data file the code reads. A skill, a prompt the project's
+code does not read, a document, slides, research or a setup take the short record, also with tests or checks next to them and
+with scripts in `.tmp/`. Both go to
+`.tmp/plans/<short-slug>.md` in the project (create the directory if needed; `.tmp/` must be in `.gitignore` - if it
+is not, say so instead of editing `.gitignore`). In a plan mode that forbids writing files, put the plan or the record
+into the plan you present and write the file once the mode is left.
+
+**With code**, after the confirmation write the full plan, one page at most:
 
 ```markdown
 # <task>
@@ -129,14 +138,32 @@ Acceptance criteria (each checked by a test, by a command, or by the user lookin
 Risks and open questions: <if any>
 ```
 
+**Without code**, write the short record once the user has said yes to it in the confirmation, and start.
+
+```markdown
+# <task>
+
+Status: active
+
+Source: <the user's words that ask for this, quoted; for a task you proposed, the words that confirmed it>
+
+Decisions:
+- <each decision from the interview; a default you took, marked (by default)>
+
+Steps:
+1. <what you will do, in order>
+
+Acceptance criteria:
+- <criterion> - <how it is checked: a test, a command, or what the user looks at>
+```
+
 Write the `Status:` line in English, exactly as shown, whatever the language of the plan: the plugin's hook looks for it to show the plan again after a compaction.
 Its values are `active`, `done` and `dropped`. A criterion that only a person can judge - how a text reads, how a
 picture looks, whether a setup is convenient - is checked by showing it to the user: name what you will show.
 
 ### Review of the plan by Codex
 
-This step applies only when the plan changes code in a repository. A plan with no code in it - research, a
-document, a setup - is not sent to Codex, and the skipped review is not mentioned.
+This step applies only to a full plan. A short record is not sent to Codex, and the skipped review is not mentioned.
 
 For a large task - a new module, a choice between approaches that is costly to reverse, or work of more than a
 session - have Codex check the plan before any code. Skip it for smaller plans, and say that you skipped it.
@@ -153,7 +180,7 @@ and wait for the completion notice. Without `--write` Codex cannot edit files. R
 and say which you checked and agree with. Do not rewrite the plan from them yourself: each finding that is a
 decision goes to the user as a question, and the plan is updated from the answers.
 
-Show the path and the plan. The plan is not consent to start: changing code or anything else still needs the
+Show the path and the plan. A full plan is not consent to start: changing code or anything else still needs the
 user's explicit go-ahead for this plan.
 
 ## Working by the plan
@@ -162,8 +189,8 @@ user's explicit go-ahead for this plan.
   it, not your memory of the interview, is the source of truth.
 - A decision that turns out wrong during the work is not yours to change silently: stop, say what you found, ask.
   When the user changes a decision during the work, update the plan so that it keeps saying what was decided: the
-  decision under `Decisions:` (a default from `Taken by default` that the user changed moves there), and the
-  acceptance criteria and the `Not touching:` section that followed from the old one.
+  decision under `Decisions:` (a default from `Taken by default` that the user changed moves there; in a short
+  record, drop its (by default) mark), and the acceptance criteria and, in a full plan, the `Not touching:` section that followed from the old one.
 - A defect in work the user already agreed to is different: the result does not do what the plan says, and you
   can see that yourself. Redo it without asking and say what was wrong and what you changed. Ask only when the fix
   needs a decision the plan does not hold.

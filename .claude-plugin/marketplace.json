@@ -10,7 +10,7 @@
       "name": "duck-factory",
       "source": "./plugins/duck-factory",
       "description": "Three skills for a development pipeline: grill (clarify and plan), review (one code review with measured depth), handoff (continue in a fresh session).",
-      "version": "0.4.2",
+      "version": "0.4.3",
       "category": "development"
     }
   ]

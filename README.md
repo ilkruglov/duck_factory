@@ -9,20 +9,21 @@ the result once with a depth that fits the change, and hand the work over to a f
 
 | Skill | When it runs | What it does |
 |---|---|---|
-| `grill` | by itself, before a non-trivial task, with or without code; or `/duck-factory:grill` | When you approved a list wholesale or the task was the agent's idea, asks first which of it to do at all; then interviews you in short rounds through the question dialog, recommended option first, and writes a one-page plan to `.tmp/plans/`. A large plan that changes code is checked by Codex before any code. |
+| `grill` | by itself, before a non-trivial task, with or without code; or `/duck-factory:grill` | When you approved a list wholesale or the task was the agent's idea, asks first which of it to do at all; then interviews you in short rounds through the question dialog, recommended option first, and writes to `.tmp/plans/` a one-page plan when the work changes code, else a short record of the decisions, steps and acceptance criteria. A large plan that changes code is checked by Codex before any code. |
 | `review` | by itself, after a finished code change; or `/duck-factory:review` | Measures the change (code lines, files, call sites, reversibility), picks a tier, runs in parallel the built-in `/code-review`, Codex with the skill's brief and, from the normal tier, Codex's adversarial review (in a final review, a Codex and a Claude reviewer per group of files) plus a check against the plan, verifies every finding, and reports. Also as a final review of all the work before a pull request, a merge or a release; a security pass when you say yes. It only finds; fixes come after you agree. |
 | `handoff` | only on `/duck-factory:handoff` | Writes `.tmp/handoff/<slug>.md` so a fresh session can continue: goal, constraints, decisions, what is done and how it was checked, what is in flight, the next step, rollback. The file starts by telling the next session to check it against reality. |
 
 ## The pipeline
 
-1. `grill` loads the skills for the area, settles the decisions and writes the plan with acceptance criteria.
-2. You approve the plan; the work goes test first.
+1. `grill` loads the skills for the area, settles the decisions and writes the plan with acceptance criteria: a full
+   one for code, a short record otherwise.
+2. You approve the plan or the record; the work goes test first.
 3. `review` runs once, before the report or a commit.
 4. After you agree: a failing test and a fix for each confirmed bug, the tests, and a short repeat review of the
    fixes only; simplification once, at the end, by Codex and the agent.
 5. `handoff` when the work continues in another session.
 
-Nothing here replaces your approval: `grill` changes nothing until you confirm, the plan is not consent to start
+Nothing here replaces your approval: `grill` changes nothing until you confirm, a full plan is not consent to start
 the work, and `review` never edits files.
 
 ## grill
@@ -48,8 +49,10 @@ How a session goes:
 3. **Questions in rounds**, through the question dialog: at most four per round, the most consequential first,
    two to four options each, the recommended one first. Every question carries the fact it hinges on. From the
    second round on, the last question lets you stop: "enough, take your recommendations for the rest".
-4. **Confirmation** with the decisions and the defaults taken without asking.
-5. **The plan**, one page in `.tmp/plans/<slug>.md`:
+4. **Confirmation** with the decisions and the defaults taken without asking; for work without code it shows the
+   short record itself, and your yes starts the work.
+5. **The plan** in `.tmp/plans/<slug>.md`. When the work changes program code - a hook, a service, a script in the repository,
+   CI, a config, prompt or data file the code reads - a full plan of one page:
 
 ```markdown
 # Export notes
@@ -76,6 +79,31 @@ Acceptance criteria (each checked by a test, by a command, or by the user lookin
 - An unknown format exits with an argparse error - tests/test_cli.py::test_export_bad_format
 
 Risks and open questions: none
+```
+
+For a skill, a prompt the project's code does not read, a document, slides, research or a setup - also with tests or checks next
+to them - the agent writes a short record instead, the plan it works by: the decisions (a default marked as such),
+the steps and the acceptance criteria, each with its check. It comes back after a compaction like a full plan, and
+the report at the end goes through its criteria.
+
+```markdown
+# Review composition from the bench
+
+Status: active
+
+Source: "let's do as you propose"
+
+Decisions:
+- Codex always gets the brief, one for the whole change.
+- The adversarial review from the normal tier; the agent writes the focus (by default).
+
+Steps:
+1. The tier table and step 2 of the review skill.
+2. Both READMEs and changelogs.
+
+Acceptance criteria:
+- The tests pass - `uvx pytest -q tests`.
+- You accept the list of behaviour changes - you look at it.
 ```
 
 `Status` is `active` until you accept the result (`done`) or cancel the work (`dropped`); the line stays in

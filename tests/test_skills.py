@@ -257,9 +257,46 @@ def review_brief(skills: Path) -> str:
 def test_the_hook_finds_a_plan_written_from_the_template_of_either_grill(tmp_path: Path) -> None:
     for skills in (CLAUDE, CODEX):
         text = (skills / "grill" / "SKILL.md").read_text(encoding="utf-8")
-        template = text[text.index("```markdown\n") + len("```markdown\n") :]
-        written = plan(tmp_path / skills.parent.name, "plan.md", None, text=template[: template.index("```")])
-        assert str(written) in run_hook(written.parents[2]).stdout, skills
+        templates = [part.split("```")[0] for part in text.split("```markdown\n")[1:]]
+        assert len(templates) == 2, skills  # the full plan and the short record
+        for number, template in enumerate(templates):
+            written = plan(tmp_path / f"{skills.parent.name}-{number}", "plan.md", None, text=template)
+            assert str(written) in run_hook(written.parents[2]).stdout, (skills, number)
+
+
+def test_grill_writes_a_short_record_for_work_without_code() -> None:
+    """The owner objected three times to a full plan for slides and skills (22-24.11); a record for the agent
+    itself, with steps and checked criteria, still comes back after a compaction and is what the review checks."""
+    for skills in (CLAUDE, CODEX):
+        text = words(skills / "grill" / "SKILL.md")
+        assert "changes program code" in text, skills
+        short = text[text.index("**Without code**") :]
+        template = short[short.index("```markdown") : short.index("```", short.index("```markdown") + 3)]
+        for heading in ("Status: active", "Source:", "Decisions:", "Steps:", "Acceptance criteria:"):
+            assert heading in template, (skills, heading)
+        assert "how it is checked" in template and "(by default)" in template, skills
+        for absent in ("Goal:", "Skills used:", "Not touching:", "Scope:", "Risks"):
+            assert absent not in template, (skills, absent)
+        assert "start, or change something" in text, skills  # one question holds the record; yes is the go-ahead
+        assert "never from a line marked (by default)" in text, skills  # the agent's own picks are not decisions
+        assert "and the (by default) mark" in text, skills  # both may be written in the user's language
+        assert "drop its (by default) mark" in text, skills  # a default the user changed is a decision now
+        assert "still write the record" in text and "for large work" not in text, skills  # skipped interview too
+        assert "a prompt the project's code does not read" in text and "no program loads" not in text, skills
+        plan_part = between(text, "## The plan", "### Review of the plan")
+        assert "Plan mode" in plan_part or "plan mode" in plan_part, skills  # not inside the full-plan-only review
+        assert "in the full plan" in text, skills  # a short record has no Skills used line
+        assert "a config, prompt or data file the code reads" in text, skills  # the review counts those as code
+        assert "approved with the confirmation" not in text and text.count("go-ahead") <= 2, skills  # said once
+    assert "In a plan mode that forbids writing files" in words(CLAUDE / "grill" / "SKILL.md")
+    assert "the record goes into the final message" in words(CODEX / "grill" / "SKILL.md")  # a Plan-mode question is one sentence
+    for name in ("README.md", "README.ru.md", "CHANGELOG.md", "CHANGELOG.ru.md"):
+        text = words(ROOT / name)
+        assert "checks the change against it" not in text and "\u0441\u0432\u0435\u0440\u044f\u0435\u0442 \u0441 \u043d\u0435\u0439 \u043f\u0440\u0430\u0432\u043a\u0443" not in text, name  # no review of .md
+    readme = words(ROOT / "README.md")
+    assert "You objected" not in readme and "a script in the repository" in readme
+    for name in ("README.md", "CHANGELOG.md"):
+        assert "a config, prompt or data file the code reads" in words(ROOT / name), name
 
 
 def test_grill_asks_whether_to_do_an_inferred_task_and_tracks_the_plan() -> None:
@@ -267,7 +304,7 @@ def test_grill_asks_whether_to_do_an_inferred_task_and_tracks_the_plan() -> None
         text = words(skills / "grill" / "SKILL.md")
         assert "Source:" in text, skills
         assert "whether to do it at all" in text, skills
-        assert "only when the plan changes code" in text, skills
+        assert "only to a full plan" in text, skills  # a short record has no code to check against the repository
         assert "wholesale" in text, skills  # "do everything" about a list, not every request with two tasks
         assert "named one by one" in text, skills
     assert "more than four" in words(CLAUDE / "grill" / "SKILL.md")  # the dialog holds four options
@@ -441,7 +478,7 @@ def test_codex_grill_asks_by_mode() -> None:
     assert "Plan mode" in rows["`request_user_input_async`"]
     text = words(CODEX / "grill" / "SKILL.md")
     assert "end the turn with the open questions written out in your final message" in text
-    assert "in Plan mode, give the plan in your final answer" in text
+    assert "in Plan mode, give the plan or the record in your final answer" in text
 
 
 def test_readmes_show_the_final_row_and_the_anchor_links() -> None:
@@ -522,7 +559,7 @@ def test_grill_takes_only_the_users_decisions_from_accepted_plans() -> None:
         "`Status: done`",
         "never from its `Taken by default, not asked` section",  # those were the agent's picks
         "never from a plan that was dropped",
-        "translated heading",  # plans are written in the user's language, headings included
+        "headings and the (by default) mark in translation",  # plans are written in the user's language, headings included
         "from the current folder up to the root of the repository",  # as the hook looks
         "would load for the files",  # nested rules load only when their files are read
         "Before the first round, search once",  # not again before every question
