@@ -290,24 +290,27 @@ steps, once for the whole work:
 4. Simplify the change: Codex lists simplifications, and you go through the diff yourself meanwhile. The directions,
    for both: reuse - code that re-implements a helper the codebase already has; simplification - duplication, state
    that can be derived, abstractions with one user, dead code and leftovers of the fixes; efficiency - repeated reads
-   and computation; altitude - a special case where the general rule should change; in the text of skills, prompts and
-   docs, rules repeated or contradicting each other within the text, between mirrored versions and with the README,
-   rules longer than an agent needs, and instructions that make an agent do needless calls and reads. Write to
-   `.tmp/review/<run>/simplify-find.md`: "Find simplifications in the change in the repository at `<path>` since
+   and computation; altitude - a special case where the general rule should change; in the text of skills, prompts
+   and docs, rules repeated or contradicting each other within the text, between mirrored versions and with the
+   README, rules longer than an agent needs, and instructions that make an agent do needless calls and reads. Write
+   to `.tmp/review/<run>/simplify-find.md`: "Find simplifications in the change in the repository at `<path>` since
    `<base>` (`git diff <base>`, uncommitted files included; new files: `git ls-files -o --exclude-standard`). Do not
-   change any files. Look for: `<the directions above>`. Report only changes that keep behaviour and stay inside the
-   change, each separately: file:line, what to change, why the behaviour stays the same. Number them. Answer in
-   <the user's language>." Run it in the background:
+   change any files. Do it yourself: do not start a skill or other agents. Read the project's rules first - the
+   instruction files for the changed files (`CLAUDE.md`, `AGENTS.md`, `.claude/rules/` and the like) not already in
+   your context - and keep to them. Look for: `<the directions above>`. Report only changes that keep behaviour and
+   stay inside the change, each separately: file:line, what to change, why the behaviour stays the same. Number them.
+   Answer in <the user's language>." Run it in the background:
 
    ```bash
    timeout 900 node "<CODEX_ROOT>/scripts/codex-companion.mjs" task --fresh --prompt-file .tmp/review/<run>/simplify-find.md
    ```
 
-   Then go through the diff yourself for the same directions. From Codex's list drop taste - a rewrite with no real
-   gain, such as savings on a path that rarely runs - and anything that changes behaviour or touches code the change
-   did not touch; check each remaining item against the code. Apply those and your own. Without Codex, the step is
-   yours alone. Keep the list of the places this step changed, each with its text before and after, taken from your
-   edits.
+   Wait for Codex's list before you edit: your edits would move its line numbers. From Codex's list drop taste - a
+   rewrite with no real gain, such as savings on a path that rarely runs - and anything that changes behaviour or
+   touches code the change did not touch; check each remaining item against the code. Apply those and your own, your
+   own under the same limits: what keeps behaviour and stays inside the change. Without Codex, the step is yours
+   alone. Keep the list of the places this step changed, each with its text before and after, taken from your edits.
+
 5. The project's tests, then one Codex task (without Codex, a Claude subagent with a fresh context) with the repeat
    brief for the places the simplification changed, with their text before and after and the bracketed check. Write
    the Codex brief to `.tmp/review/<run>/simplify.md` and run it in the background:

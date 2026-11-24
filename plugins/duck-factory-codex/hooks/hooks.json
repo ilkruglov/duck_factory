@@ -1,0 +1,18 @@
+{
+  "description": "Brings the active plan back after a compaction, and names the active plans and handoff files when a session starts.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -I \"${PLUGIN_ROOT}/scripts/context_hooks.py\"",
+            "timeout": 10,
+            "additionalContextLimit": 5000
+          }
+        ]
+      }
+    ]
+  }
+}

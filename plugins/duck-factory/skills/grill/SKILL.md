@@ -69,10 +69,12 @@ project's rules: the instruction files Claude Code would load for the files this
 `AGENTS.md`, `.claude/rules/` and the like) not already in your context, and the files they point to that cover those
 files. From a plan, take a decision only from the `Decisions:` section of a plan with `Status: done`, never from its
 `Taken by default, not asked` section, never from a line marked (by default) - both were your own picks - and never
-from a plan that was dropped. Plans are
-written in the user's language, so look for these headings and the (by default) mark in translation too; only the `Status:` line is
-always in English. When two plans disagree, ask the user which one holds, quoting both. If nothing the decision
-rested on has changed, it is a default like any other, shown with the plan or file it came from.
+from a plan that was dropped. Handoff files in `.tmp/handoff/` of the same folders count too: take decisions from
+the `Decisions and why` section of one with `Status: done`, not the options it lists as tried and dropped. Plans and
+handoff files are written in the user's language, so look for these headings and the (by default) mark in
+translation too; only the `Status:` line is always in English. When two plans or handoff files disagree, ask the
+user which one holds, quoting both. If nothing the decision rested on has changed, it is a default like any other,
+shown with the plan or file it came from.
 
 Ask with the **AskUserQuestion** tool, never as a numbered list in text. If the tool is not available in this
 session (a headless run), ask in text by the same rules: at most 4 questions, each standing alone, your
@@ -157,7 +159,7 @@ Acceptance criteria:
 - <criterion> - <how it is checked: a test, a command, or what the user looks at>
 ```
 
-Write the `Status:` line in English, exactly as shown, whatever the language of the plan: the plugin's hook looks for it to show the plan again after a compaction.
+Write the `Status:` line in English, exactly as shown, right under the title, whatever the language of the plan: the plugin's hook looks for it to show the plan again after a compaction.
 Its values are `active`, `done` and `dropped`. A criterion that only a person can judge - how a text reads, how a
 picture looks, whether a setup is convenient - is checked by showing it to the user: name what you will show.
 

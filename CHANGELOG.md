@@ -5,6 +5,33 @@ Codex (`plugins/duck-factory-codex`) - carry the same version since 0.2.0, excep
 Code plugin only. The commit messages hold the measurements and the reasons in full. Russian:
 [CHANGELOG.ru.md](CHANGELOG.ru.md).
 
+## 0.4.4 - 2026-11-25
+
+- In Codex, the simplification step at the end of `review` no longer rests on the author alone: a fresh sub-agent
+  lists simplifications without changing anything while the agent goes through the diff itself, then the agent drops
+  what is only taste, changes behaviour or touches code outside the change, and applies the rest with its own - the
+  same step as in Claude Code, with a sub-agent in place of Codex. On two finished changes a fresh Codex found 23
+  real simplifications, more than a Claude agent with the same directions (14); the author alone was not measured.
+- `handoff` files get a `Status` line, as plans do: `active` until the work they hand over is finished or dropped;
+  the sentence under it tells the session that finishes the work to change it. The hooks name an active handoff file
+  with its date when a session starts - the agent reads it only when you ask to continue that work, so "let's
+  continue" is enough - and after a compaction, so that a session working from it reads its traps and decisions
+  again; the summary keeps its path. Files without a `Status` line are not named. `grill` takes earlier decisions
+  from handoff files marked `done` too.
+- The hook takes the `Status` of a plan or handoff file only from the first line of text under the title, written
+  plainly or in bold, so a quoted `Status: active` - under the title or further down - no longer marks a file
+  active, and it reads only the head of each file, so a bad byte further down no longer hides it; it writes UTF-8
+  whatever the console's encoding, so a Windows console no longer garbles or drops Cyrillic. After a compaction the
+  hook builds the whole output and measures it as each host does - 9500 UTF-16 units for Claude Code, 19,000 bytes
+  of UTF-8 for Codex - and while it does not fit, the largest plan gives way to its path, so the output stays under
+  both limits in any script. Dates read "today", "yesterday" or "N days ago" by the calendar. When a session starts,
+  the agent reads a named plan, like a handoff file, only when you ask to continue that work.
+- The Codex plugin gets the same hook on `SessionStart`: it names the active plans and handoff files when a session
+  starts or resumes and brings the plan back in full after a compaction, with `additionalContextLimit` 5000 (Codex
+  counts a token as 4 bytes of UTF-8). Codex runs it once you trust it in `/hooks`. Codex ignores what a
+  `PreCompact` hook prints, so the request to the summary stays in Claude Code. Checked in a live Codex session.
+- A `ruff.toml` keeps the line length at 120, so `ruff format` without flags leaves the code as it is.
+
 ## 0.4.3 - 2026-11-24
 
 - `grill` writes the full one-page plan only when the work changes program code: a hook, a service, a script in

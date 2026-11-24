@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import datetime
+import importlib.util
 import json
+import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -67,7 +71,9 @@ def run_hook(cwd: Path, raw: str | None = None, **fields: object) -> subprocess.
     """The hook on an event: by default the start of a session after a compaction, in `cwd`."""
     event = {"cwd": str(cwd), "hook_event_name": "SessionStart", "source": "compact", **fields}
     stdin = json.dumps(event) if raw is None else raw
-    return subprocess.run([sys.executable, "-I", str(HOOK)], input=stdin, capture_output=True, text=True, check=False)
+    return subprocess.run(
+        [sys.executable, "-I", str(HOOK)], input=stdin, capture_output=True, text=True, encoding="utf-8", check=False
+    )
 
 
 def plan(root: Path, name: str, status: str | None, tail: str = "", text: str | None = None) -> Path:
@@ -139,12 +145,14 @@ def test_in_a_new_session_the_hook_only_names_the_active_plan(tmp_path: Path) ->
     active = plan(tmp_path, "export.md", "active")
     plan(tmp_path, "old.md", "done")
     # A resumed session still has its history, so the plan is not printed again: only a compaction loses it.
-    for source in ("startup", "resume", "clear"):
+    for source in ("startup", "resume"):  # not `clear`: the user clears to start from an empty context
         shown = run_hook(tmp_path, source=source).stdout
         assert str(active) in shown
         assert "old.md" not in shown
         assert "Goal: something" not in shown
         assert "today" in shown  # when it was last changed
+        # The user may have started a new session to get away from that work.
+        assert "only when the user asks to continue that work" in " ".join(shown.split()), source
         assert len(shown) < 700
 
 
@@ -209,6 +217,250 @@ def test_before_a_compaction_the_hook_works_without_plans_and_yields_to_the_user
     assert before_compaction(tmp_path, "keep only the test results") == ""
 
 
+def handoff(root: Path, name: str, status: str | None) -> Path:
+    path = root / ".tmp" / "handoff" / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    head = f"# {name} - handoff\n\n" + (f"Status: {status}\n\n" if status else "")
+    path.write_text(head + "Traps: the render farm drops jobs over 20 minutes\n", encoding="utf-8")
+    return path
+
+
+def test_at_the_start_of_a_session_the_hook_names_an_active_handoff_with_its_date(tmp_path: Path) -> None:
+    active = handoff(tmp_path, "ep20.md", "active")
+    handoff(tmp_path, "ep19.md", "done")
+    handoff(tmp_path, "legacy.md", None)  # written before handoff files had a Status line
+    for source in ("startup", "resume"):  # not `clear`: the user clears to start from an empty context
+        shown = run_hook(tmp_path, source=source).stdout
+        assert f"{active} (last changed {datetime.date.today().isoformat()}, today)" in shown, source
+        assert "ep19.md" not in shown and "legacy.md" not in shown, source
+        assert "render farm" not in shown, source  # named, not loaded: the session may be about something else
+        flat = " ".join(shown.split())
+        assert "only when the user asks to continue that work" in flat, source
+        # The user may have started a new session to get away from that work: no question about it, no closing rule.
+        assert "ask the user" not in flat and "Status line" not in flat, source
+        assert len(shown) < 600
+
+
+def test_after_a_compaction_the_hook_names_the_active_handoff_and_asks_to_reread_it(tmp_path: Path) -> None:
+    active = handoff(tmp_path, "ep20.md", "active")
+    plan(tmp_path, "export.md", "active")
+    shown = run_hook(tmp_path).stdout
+    assert "Goal: something" in shown  # the plan still comes back in full
+    assert str(active) in shown and "render farm" not in shown
+    assert shown.index("Goal: something") < shown.index(str(active))  # the plan first: it is the source of truth
+    flat = " ".join(shown.split())
+    assert "read its traps and decisions again" in flat and "handoff file's Status line to done" in flat
+
+
+def test_after_a_compaction_plans_and_handoffs_together_stay_under_the_limit(tmp_path: Path) -> None:
+    deep = tmp_path / ("a" * 80) / ("b" * 80) / ("c" * 80)  # long paths are part of the output too
+    plans = [plan(deep, f"plan{n}-{'x' * 40}.md", "active", tail=str(n) * 2560) for n in range(3)]
+    handoffs = [handoff(deep, f"handoff{n}-{'z' * 40}.md", "active") for n in range(3)]
+    for n, path in enumerate(plans):
+        os.utime(path, (1_000_000 + n, 1_000_000 + n))
+    shown = run_hook(deep).stdout
+    assert len(shown) < 10_000  # over that, Claude Code moves a hook's output to a file
+    assert all(str(path) in shown for path in plans + handoffs)
+    assert "2" * 2560 in shown  # the newest plan still comes back in full
+
+
+def test_only_the_first_line_under_the_title_is_the_files_status(tmp_path: Path) -> None:
+    active = handoff(tmp_path, "ep20.md", "active")
+    quoted = handoff(tmp_path, "quoted.md", None)  # an old file quoting the Status line of a plan
+    quoted.write_text(
+        "# old - handoff\n\nGoal: x\n\nDecisions and why:\n> Status: active was its line\n", encoding="utf-8"
+    )
+    plan(tmp_path, "fenced.md", None, tail="```markdown\n# a plan\n\nStatus: active\n```\n")
+    shown = run_hook(tmp_path, source="startup").stdout
+    assert str(active) in shown
+    assert "quoted.md" not in shown and "fenced.md" not in shown
+
+
+def test_the_title_and_headings_under_it_are_not_the_status(tmp_path: Path) -> None:
+    bom = plan(tmp_path, "bom.md", None, text="\ufeff# bom\n\nStatus: active\n\nGoal: bom\n")  # an editor on Windows
+    plan(tmp_path, "title.md", None, text="# Status: active\n\nStatus: done\n")
+    handoff(tmp_path, "nested.md", None).write_text("# Old\n\n## Example\n\n> Status: active\n", encoding="utf-8")
+    # Only a plain or bold Status line counts: a quote, a heading or a list item right under the title is not one.
+    odd = {
+        "quote": "> Status: active was its line",
+        "heading": "## Status: active",
+        "item": "- Status: active",
+        "italic": "*Status:* active",
+        "code": "    Status: active",  # indented: a code block
+        "longer": "Status: active2",
+        "dashed": "Status: active-old",
+        "unclosed": "**Status: active",
+        "mismatched": "**Status:__ active",
+    }
+    for name, line in odd.items():
+        handoff(tmp_path, f"{name}.md", None).write_text(f"# Old\n\n{line}\n\nStatus: done\n", encoding="utf-8")
+    underscored = plan(tmp_path, "underscored.md", None, text="# u\n\n__Status:__ active\n")  # bold too
+    shown = run_hook(tmp_path, source="startup").stdout
+    assert str(bom) in shown and str(underscored) in shown
+    for name in ("title", "nested", *odd):
+        assert f"{name}.md" not in shown, name
+    # A line cut where the hook stops reading is not read as a whole one: `active2` is not `active`.
+    cut = "# " + "x" * 1982 + "\n\nStatus: active2\n"
+    assert len(cut.encode("utf-8")[: cut.index("2\n")]) == 2000
+    plan(tmp_path, "cut.md", None, text=cut)
+    # But a file that ends right where the reading stops is read whole, and any line break counts.
+    ends = "# " + "x" * 1982 + "\n\nStatus: active"
+    assert len(ends.encode("utf-8")) == 2000
+    plan(tmp_path / "whole", "ends.md", None, text=ends)  # apart: only the newest three plans come back
+    plan(tmp_path / "whole", "mac.md", None, text="# mac\rStatus: active\r" + "x" * 3000 + "\r")
+    assert "cut.md" not in run_hook(tmp_path, source="startup").stdout
+    whole = run_hook(tmp_path / "whole", source="startup").stdout
+    assert "ends.md" in whole and "mac.md" in whole
+    after = run_hook(tmp_path).stdout  # after a compaction the plan itself is read, BOM and all
+    assert "# bom\n\nStatus: active\n\nGoal: bom" in after and "\ufeff" not in after
+
+
+def test_a_plan_gone_before_it_is_printed_is_named_and_the_rest_still_shown(tmp_path: Path) -> None:
+    spec = importlib.util.spec_from_file_location("context_hooks", HOOK)
+    assert spec and spec.loader
+    hooks = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(hooks)
+    kept = plan(tmp_path, "kept.md", "active")
+    gone = kept.parent / "gone.md"  # found active, then removed before the hook read it in full
+    shown = hooks.in_full([(gone, 2.0), (kept, 1.0)], "")
+    assert f"{gone} ---\nCould not be read: it may have been moved or removed." in shown  # not "too long, read it"
+    assert "Goal: something" in shown
+
+
+def fits_both_hosts(text: str) -> bool:
+    """Claude Code counts UTF-16 units up to 10,000; Codex counts 4 bytes of UTF-8 as a token, up to 5000."""
+    return len(text.encode("utf-16-le")) // 2 < 10_000 and len(text.encode("utf-8")) / 4 <= 5000
+
+
+def test_after_a_compaction_a_plan_in_any_script_stays_under_both_limits(tmp_path: Path) -> None:
+    mixed = "a" * 5000 + "\U0001f986" * 2900  # Latin letters count once in UTF-16, emoji twice
+    for name, body in (("chinese", "\u754c" * 8000), ("emoji", "\U0001f986" * 6000), ("mixed", mixed)):
+        export = plan(tmp_path / name, "export.md", "active", tail=body)
+        handoff(tmp_path / name, "\u4ea4\u63a5.md", "active")  # a handoff file with a Chinese name, named after it
+        shown = run_hook(tmp_path / name).stdout
+        assert str(export) in shown and "\u4ea4\u63a5.md" in shown, name
+        assert fits_both_hosts(shown), name
+
+
+def test_after_a_compaction_the_limit_of_codex_counts_too(tmp_path: Path) -> None:
+    # A Chinese plan of 18,900 bytes fits Claude Code's 10,000 UTF-16 units easily; with the names of three handoff
+    # files around it, it would not fit Codex's 5000 tokens of 4 bytes.
+    text = "\u754c" * 6300
+    export = plan(tmp_path, "export.md", "active", tail=text)
+    for n in range(3):
+        handoff(tmp_path, "\u4ea4" * 60 + f"{n}.md", "active")
+    shown = run_hook(tmp_path).stdout
+    assert str(export) in shown and text not in shown and fits_both_hosts(shown)
+    whole = len(shown.encode("utf-8")) + len(export.read_text(encoding="utf-8").encode("utf-8"))
+    assert whole > 20_000  # shown in full, it would have been over Codex's limit
+
+
+def test_after_a_compaction_the_plan_that_gives_way_is_the_largest_as_measured(tmp_path: Path) -> None:
+    # Emoji take 4 bytes of UTF-8 each: the emoji plan is the largest, though it has fewer characters.
+    emoji = plan(tmp_path, "emoji.md", "active", tail="\U0001f986" * 4150)
+    latin = [plan(tmp_path, f"latin{n}.md", "active", tail=str(n) * 4200) for n in range(2)]
+    for n, path in enumerate([*latin, emoji]):
+        os.utime(path, (1_000_000 + n, 1_000_000 + n))  # the emoji plan is the newest
+    shown = run_hook(tmp_path).stdout
+    assert "0" * 4200 in shown and "1" * 4200 in shown and "\U0001f986" * 100 not in shown
+    assert fits_both_hosts(shown) and str(emoji) in shown
+
+
+def test_after_a_compaction_plans_that_fit_are_shown_in_full(tmp_path: Path) -> None:
+    # Chinese takes 3 bytes of UTF-8 a character: a plan just under Codex's limit still comes back whole.
+    export = plan(tmp_path / "chinese", "export.md", "active")
+    room = 19_000 - len(run_hook(tmp_path / "chinese").stdout.encode("utf-8"))
+    body = "\u754c" * ((room - 30) // 3)
+    plan(tmp_path / "chinese", "export.md", "active", tail=body)
+    shown = run_hook(tmp_path / "chinese").stdout
+    assert body in shown and fits_both_hosts(shown) and str(export) in shown
+    # A tiny old plan does not push out a big new one when both fit.
+    big = plan(tmp_path / "pair", "big.md", "active")
+    tiny = plan(tmp_path / "pair", "tiny.md", None, text="Status: active\n")
+    os.utime(tiny, (1_000_000, 1_000_000))
+    room = 9500 - len(run_hook(tmp_path / "pair").stdout)
+    body = "b" * (room - 30)
+    plan(tmp_path / "pair", "big.md", "active", tail=body)
+    shown = run_hook(tmp_path / "pair").stdout
+    assert body in shown and f"{tiny} ---\nStatus: active" in shown and str(big) in shown
+
+
+def test_a_file_name_that_is_not_utf_8_does_not_silence_the_hook(tmp_path: Path) -> None:
+    export = plan(tmp_path, "export.md", "active")
+    try:
+        (export.parent / os.fsdecode(b"bad-\xff.md")).write_bytes(b"# bad\n\nStatus: active\n")
+    except (OSError, UnicodeError):  # Windows decodes file names strictly
+        pytest.skip("this file system takes only UTF-8 names")
+    assert str(export) in run_hook(tmp_path, source="startup").stdout
+
+
+def test_the_hook_speaks_utf_8_whatever_the_console_encoding(tmp_path: Path) -> None:
+    cwd = tmp_path / "\u043f\u0440\u043e\u0435\u043a\u0442"  # a Cyrillic folder name
+    plan(cwd, "export.md", "active", tail="Goal: \u044d\u043a\u0441\u043f\u043e\u0440\u0442\n")
+    event = json.dumps({"cwd": str(cwd), "hook_event_name": "SessionStart", "source": "compact"}, ensure_ascii=False)
+    # A Windows console: stdin and stdout in cp1252, which has no Cyrillic.
+    console = (
+        "import io, runpy, sys; "
+        "sys.stdin = io.TextIOWrapper(sys.stdin.buffer, encoding='cp1252', errors='replace'); "
+        "sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='cp1252'); "
+        f"runpy.run_path({str(HOOK)!r}, run_name='__main__')"
+    )
+    done = subprocess.run([sys.executable, "-I", "-c", console], input=event.encode(), capture_output=True, check=False)
+    assert "Goal: \u044d\u043a\u0441\u043f\u043e\u0440\u0442" in done.stdout.decode("utf-8")
+
+
+def test_the_date_and_the_age_of_a_handoff_agree(tmp_path: Path) -> None:
+    path = handoff(tmp_path, "ep20.md", "active")
+    today = datetime.date.today()
+    midnight = datetime.datetime.combine(today, datetime.time()).timestamp()
+    for changed, day, age in (
+        (midnight - 60, today - datetime.timedelta(days=1), "yesterday"),  # late last night is not "today"
+        (midnight - 3 * 86400 + 3600, today - datetime.timedelta(days=3), "3 days ago"),
+        (time.time() + 2 * 86400, today, "today"),  # a clock ahead of this one is not "-2 days ago"
+    ):
+        os.utime(path, (changed, changed))
+        assert f"(last changed {day.isoformat()}, {age})" in run_hook(tmp_path, source="startup").stdout, age
+
+
+def test_a_bad_byte_far_down_does_not_hide_an_active_file(tmp_path: Path) -> None:
+    active = handoff(tmp_path, "ep20.md", "active")
+    active.write_bytes(active.read_bytes() + b"x" * 3000 + b"\xff\n")
+    export = plan(tmp_path, "export.md", "active")
+    export.write_bytes(export.read_bytes() + b"\xff\n")
+    shown = run_hook(tmp_path).stdout
+    assert str(active) in shown and "Goal: something" in shown
+
+
+def test_before_a_compaction_the_summary_keeps_the_path_of_the_active_handoff(tmp_path: Path) -> None:
+    active = handoff(tmp_path, "ep20.md", "active")
+    handoff(tmp_path, "ep19.md", "done")
+    asked = before_compaction(tmp_path)
+    assert str(active) in asked and "ep19.md" not in asked
+
+
+def test_the_hook_names_at_most_three_handoffs_the_newest_first(tmp_path: Path) -> None:
+    paths = [handoff(tmp_path, f"work{n}.md", "active") for n in range(5)]
+    for n, path in enumerate(paths):
+        os.utime(path, (1_000_000 + n, 1_000_000 + n))
+    shown = run_hook(tmp_path, source="startup").stdout
+    assert [p.name for p in paths if str(p) in shown] == ["work2.md", "work3.md", "work4.md"]
+    assert shown.index("work4.md") < shown.index("work3.md")
+
+
+def test_handoff_files_carry_a_status_and_grill_reads_the_decisions_of_closed_ones() -> None:
+    for skills in (CLAUDE, CODEX):
+        text = (skills / "handoff" / "SKILL.md").read_text(encoding="utf-8")
+        template = between(text, "```markdown", "```")
+        assert "Status: active" in template, skills
+        # The session that finishes the work reads the file, not this skill: the closing rule goes into the file.
+        assert "change the Status line to `done`; when it is dropped, to `dropped`" in " ".join(template.split())
+        assert "Keep the sentence under the Status line" in " ".join(text.split()), skills
+        grill = words(skills / "grill" / "SKILL.md")
+        assert "the `Decisions and why` section of one with `Status: done`" in grill, skills
+        assert "not the options it lists as tried and dropped" in grill, skills
+        assert "exactly as shown, right under the title" in grill, skills  # the hook looks for it only there
+
+
 def test_hooks_are_registered() -> None:
     hooks = json.loads((ROOT / "plugins" / "duck-factory" / "hooks" / "hooks.json").read_text(encoding="utf-8"))[
         "hooks"
@@ -219,6 +471,21 @@ def test_hooks_are_registered() -> None:
     for groups in hooks.values():
         for group in groups:
             assert all("scripts/context_hooks.py" in hook["command"] for hook in group["hooks"])
+
+
+def test_the_codex_plugin_carries_the_same_script_on_session_start_only() -> None:
+    codex = ROOT / "plugins" / "duck-factory-codex"
+    assert (codex / "scripts" / "context_hooks.py").read_bytes() == HOOK.read_bytes()  # one script, two copies
+    hooks = json.loads((codex / "hooks" / "hooks.json").read_text(encoding="utf-8"))["hooks"]
+    assert list(hooks) == ["SessionStart"]  # Codex ignores what a PreCompact hook prints
+    (starting,) = hooks["SessionStart"]
+    assert set(starting["matcher"].split("|")) == {"compact", "resume", "startup"}
+    (hook,) = starting["hooks"]
+    assert hook["type"] == "command"  # Codex skips any other kind of handler here
+    assert hook["command"] == 'python3 -I "${PLUGIN_ROOT}/scripts/context_hooks.py"'
+    # Codex counts a token as 4 bytes of UTF-8 and moves output over 2500 of them to a file; 9500 characters of
+    # Cyrillic after a compaction are 19,000 bytes, 4750 such tokens.
+    assert hook["additionalContextLimit"] == 5000 and hook["timeout"] == 10
 
 
 # --- what both versions of the skills must say -----------------------------------------
@@ -289,10 +556,16 @@ def test_grill_writes_a_short_record_for_work_without_code() -> None:
         assert "a config, prompt or data file the code reads" in text, skills  # the review counts those as code
         assert "approved with the confirmation" not in text and text.count("go-ahead") <= 2, skills  # said once
     assert "In a plan mode that forbids writing files" in words(CLAUDE / "grill" / "SKILL.md")
-    assert "the record goes into the final message" in words(CODEX / "grill" / "SKILL.md")  # a Plan-mode question is one sentence
+    assert "the record goes into the final message" in words(
+        CODEX / "grill" / "SKILL.md"
+    )  # a Plan-mode question is one sentence
     for name in ("README.md", "README.ru.md", "CHANGELOG.md", "CHANGELOG.ru.md"):
         text = words(ROOT / name)
-        assert "checks the change against it" not in text and "\u0441\u0432\u0435\u0440\u044f\u0435\u0442 \u0441 \u043d\u0435\u0439 \u043f\u0440\u0430\u0432\u043a\u0443" not in text, name  # no review of .md
+        assert (
+            "checks the change against it" not in text
+            and "\u0441\u0432\u0435\u0440\u044f\u0435\u0442 \u0441 \u043d\u0435\u0439 \u043f\u0440\u0430\u0432\u043a\u0443"
+            not in text
+        ), name  # no review of .md
     readme = words(ROOT / "README.md")
     assert "You objected" not in readme and "a script in the repository" in readme
     for name in ("README.md", "CHANGELOG.md"):
@@ -563,7 +836,7 @@ def test_grill_takes_only_the_users_decisions_from_accepted_plans() -> None:
         "from the current folder up to the root of the repository",  # as the hook looks
         "would load for the files",  # nested rules load only when their files are read
         "Before the first round, search once",  # not again before every question
-        "two plans disagree, ask",  # plans carry no date to tell which is newer
+        "two plans or handoff files disagree, ask",  # neither carries a date to tell which is newer
     ):
         assert phrase in rule, phrase
     defaults = between(text, "Defaults are not hidden", "**")
@@ -610,23 +883,40 @@ def test_claude_review_briefs_live_in_a_folder_of_their_own_run() -> None:
     assert ".tmp/review/<run>/group-<number>.md" in files  # a name with a space or a name like "security" is safe
 
 
-def test_simplification_runs_in_the_own_context_without_agents() -> None:
+def test_simplification_joins_a_fresh_list_with_the_agents_own_pass() -> None:
     # On two reviewed changes /simplify found 17 real simplifications for 65M Claude tokens and applied a change of
-    # behaviour; Codex found 23 without Claude tokens, the agent alone 14, the two together 31 of 37.
-    for skills, start in ((CLAUDE, "4. Simplify the change"), (CODEX, "4. Simplify the change yourself")):
+    # behaviour; Codex found 23 without Claude tokens, a fresh Claude agent 14, the two together 31 of 37.
+    for skills, start in ((CLAUDE, "4. Simplify the change"), (CODEX, "4. Simplify the change")):
         text = words(skills / "review" / "SKILL.md")
         step = between(text, start, "5. The project's tests")
         assert "`/simplify`" not in text, skills  # not the built-in skill
         for angle in ("reuse", "simplification", "efficiency", "altitude", "rules repeated or contradicting"):
             assert angle in step, (skills, angle)
-    codex = between(words(CODEX / "review" / "SKILL.md"), "4. Simplify the change yourself", "5. The project's tests")
-    assert "without starting agents" in codex
+    codex = between(words(CODEX / "review" / "SKILL.md"), "4. Simplify the change", "5. The project's tests")
+    assert 'fork_turns="none"' in codex and "Do not change any files" in codex  # a fresh reader lists, edits nothing
+    assert "go through the diff yourself" in codex and "Without sub-agents, the step is yours alone" in codex
+    for dropped in ("taste", "changes behaviour", "code the change did not touch"):
+        assert dropped in codex, dropped  # what the agent drops from the sub-agent's list
     claude = between(words(CLAUDE / "review" / "SKILL.md"), "4. Simplify the change", "5. The project's tests")
     assert "task --fresh --prompt-file .tmp/review/<run>/simplify-find.md" in claude  # Codex lists, changes nothing
     assert "Do not change any files" in claude and "go through the diff yourself" in claude
     for dropped in ("taste", "changes behaviour", "code the change did not touch"):
         assert dropped in claude, dropped  # what the agent drops from Codex's list
     assert "Without Codex, the step is yours alone" in claude
+    for skills in (CLAUDE, CODEX):
+        step = between(words(skills / "review" / "SKILL.md"), "4. Simplify the change", "5. The project's tests")
+        assert "before you edit" in step, skills  # its file:line numbers would move under your edits
+        assert "your own under the same limits" in step, skills  # keep behaviour, stay inside the change
+        assert (
+            "Do it yourself: do not start a skill or other agents" in step and "Read the project's rules first" in step
+        )
+    assert "without a fresh look" not in words(ROOT / "CHANGELOG.md")  # the bench's 14 was a fresh Claude agent
+    simplification = between(
+        words(ROOT / "README.md"), "the work ends once with a simplification", "changed behaviour."
+    )
+    assert (
+        "instead of Codex" not in simplification and "In Codex the list comes from a fresh sub-agent" in simplification
+    )
 
 
 def test_readmes_name_agents_md_for_codex_and_the_project_rules() -> None:

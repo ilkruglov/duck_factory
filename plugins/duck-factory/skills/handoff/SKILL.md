@@ -26,6 +26,11 @@ Only what the next session cannot get faster from the repository. Point to plans
 ```markdown
 # <work> - handoff, <date>
 
+Status: active
+
+When the work this file hands over is finished, change the Status line to `done`; when it is dropped, to
+`dropped`.
+
 First, check this file against reality: `git status` and `git log -3`, whether the processes under "In flight"
 still run, whether the files named here exist. Tell the user what differs before doing anything else.
 
@@ -61,8 +66,10 @@ that.
 ## Rules
 
 - State facts with their source, and mark what you did not verify: the next session will act on this file.
-- Keep the "First, check this file against reality" paragraph in every handoff, translated into the user's
-  language: the file goes stale as soon as anything changes between sessions.
+- Keep the sentence under the Status line and the "First, check this file against reality" paragraph in every
+  handoff, translated into the user's language: the session that continues the work reads this file, not this
+  skill, and the file goes stale as soon as anything changes between sessions.
 - Do not write secrets: tokens, keys, passwords, personal data.
 - Change nothing but the handoff file.
+- Write the `Status:` line in English, exactly as shown, right under the title: it is looked for only there.
 - End your reply with the path and one line the user can paste into the new session to start from it.

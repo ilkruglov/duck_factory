@@ -69,10 +69,12 @@ project's rules: the instruction files Codex would load for the files this task 
 `AGENTS.override.md` and the like) not already in your context, and the files they point to that cover those files.
 From a plan, take a decision only from the `Decisions:` section of a plan with `Status: done`, never from its
 `Taken by default, not asked` section, never from a line marked (by default) - both were your own picks - and never
-from a plan that was dropped. Plans are
-written in the user's language, so look for these headings and the (by default) mark in translation too; only the `Status:` line is
-always in English. When two plans disagree, ask the user which one holds, quoting both. If nothing the decision
-rested on has changed, it is a default like any other, shown with the plan or file it came from.
+from a plan that was dropped. Handoff files in `.tmp/handoff/` of the same folders count too: take decisions from
+the `Decisions and why` section of one with `Status: done`, not the options it lists as tried and dropped. Plans and
+handoff files are written in the user's language, so look for these headings and the (by default) mark in
+translation too; only the `Status:` line is always in English. When two plans or handoff files disagree, ask the
+user which one holds, quoting both. If nothing the decision rested on has changed, it is a default like any other,
+shown with the plan or file it came from.
 
 The **frontier** is every decision whose prerequisites are already settled; a question that depends on an answer
 you haven't heard yet waits for a later round. Ask the frontier in rounds, the most consequential first.
@@ -166,7 +168,7 @@ Acceptance criteria:
 - <criterion> - <how it is checked: a test, a command, or what the user looks at>
 ```
 
-Write the `Status:` line in English, exactly as shown, whatever the language of the plan: it marks the plan to re-read after a compaction or in a new session.
+Write the `Status:` line in English, exactly as shown, right under the title, whatever the language of the plan: it marks the plan to re-read after a compaction or in a new session.
 Its values are `active`, `done` and `dropped`. A criterion that only a person can judge - how a text reads, how a
 picture looks, whether a setup is convenient - is checked by showing it to the user: name what you will show.
 

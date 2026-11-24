@@ -226,14 +226,25 @@ security pass, are fixed after the user has seen them and said yes. In this orde
 When a round leaves nothing left to fix, or the user accepts what is left as limits, the work ends with these two
 steps, once for the whole work:
 
-4. Simplify the change yourself, in this context, without starting agents. Go through the diff for: reuse - code that
-   re-implements a helper the codebase already has; simplification - duplication, state that can be derived,
-   abstractions with one user, dead code and leftovers of the fixes; efficiency - repeated reads and computation;
-   altitude - a special case where the general rule should change. In the text of skills, prompts and docs look for
-   rules repeated or contradicting each other within the text, between mirrored versions and with the README, rules
-   longer than an agent needs, and instructions that make an agent do needless calls and reads. Apply what does not
-   change behaviour and does not widen the diff to code the change did not touch. Keep the list of the places this
-   step changed, each with its text before and after, taken from your edits.
+4. Simplify the change: a sub-agent lists simplifications, and you go through the diff yourself meanwhile. The
+   directions, for both: reuse - code that re-implements a helper the codebase already has; simplification -
+   duplication, state that can be derived, abstractions with one user, dead code and leftovers of the fixes;
+   efficiency - repeated reads and computation; altitude - a special case where the general rule should change; in
+   the text of skills, prompts and docs, rules repeated or contradicting each other within the text, between mirrored
+   versions and with the README, rules longer than an agent needs, and instructions that make an agent do needless
+   calls and reads. Spawn one sub-agent with `fork_turns="none"` and this brief: "Find simplifications in the change
+   in the repository at `<path>` since `<base>` (`git diff <base>`, uncommitted files included; new files: `git
+   ls-files -o --exclude-standard`). Do not change any files. Do it yourself: do not start a skill or other agents.
+   Read the project's rules first - the instruction files for the changed files (`AGENTS.md`, `AGENTS.override.md`
+   and the like) not already in your context - and keep to them. Look for: `<the directions above>`. Report only
+   changes that keep behaviour and stay inside the change, each separately: file:line, what to change, why the
+   behaviour stays the same. Number them. Answer in <the user's language>." Wait for the sub-agent's list before you
+   edit: your edits would move its line numbers. From the sub-agent's list drop taste - a rewrite with no real gain,
+   such as savings on a path that rarely runs - and anything that changes behaviour or touches code the change did
+   not touch; check each remaining item against the code. Apply those and your own, your own under the same limits:
+   what keeps behaviour and stays inside the change. Without sub-agents, the step is yours alone. Keep the list of
+   the places this step changed, each with its text before and after, taken from your edits.
+
 5. The project's tests, then one sub-agent with `fork_turns="none"` and the repeat brief for the places the
    simplification changed, with their text before and after and the bracketed check.
 

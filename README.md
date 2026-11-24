@@ -318,16 +318,17 @@ the code they call and their tests - not the whole change again. In Claude Code 
 subagent at effort `medium` for all the fixes (without Codex, the subagent alone); when the fixes are in several groups, that pair goes
 to every group where something was fixed. In Codex it is one sub-agent the same way.
 
-When a round leaves nothing to fix, or you accept what is left, the work ends once with a simplification: Codex lists
-simplifications without changing anything while the agent goes through the diff itself - reuse, duplication and dead
-code, repeated work, special cases where a general rule should change, and in the text of skills and docs rules
-repeated or contradicting each other (also between the two versions and the README), rules longer than an agent
-needs and needless calls. The agent drops from Codex's list what is only taste and what changes behaviour or touches
-code outside the change, and applies the rest with its own; then the tests and one repeat review of what the
-simplification changed, checking that the behaviour stayed the same. In Codex the agent does it alone. On two
-finished, reviewed changes Codex found 23 real simplifications without Claude tokens (4.4M of its own, 0.26M without cache reads), a Claude agent with the same
-directions 14, the two together 31 of 37; `/simplify` found 17 for four times the Claude tokens of the agent
-(65M against 14M, cache reads included) and in one of the two changed behaviour.
+When a round leaves nothing to fix, or you accept what is left, the work ends once with a simplification: Codex
+lists simplifications without changing anything while the agent goes through the diff itself - reuse, duplication
+and dead code, repeated work, special cases where a general rule should change, and in the text of skills and docs
+rules repeated or contradicting each other (also between the two versions and the README), rules longer than an
+agent needs and needless calls. The agent drops from Codex's list what is only taste and what changes behaviour or
+touches code outside the change, and applies the rest with its own; then the tests and one repeat review of what the
+simplification changed, checking that the behaviour stayed the same. In Codex the list comes from a fresh sub-agent.
+On two finished, reviewed changes Codex found 23 real simplifications without Claude tokens (4.4M of its own, 0.26M
+without cache reads), a Claude agent with the same directions 14, the two together 31 of 37; `/simplify` found 17
+for four times the Claude tokens of the agent (65M against 14M, cache reads included) and in one of the two changed
+behaviour.
 
 Findings the previous round already reported and you already decided on are dropped, except one a fix was meant to
 remove and that is still there. If two rounds in a row find only edge cases in the same place, the skill stops and
@@ -361,6 +362,11 @@ Runs only when you type `/duck-factory:handoff`, optionally with what the next s
 ```markdown
 # Empty-file crash in load - handoff, 2026-11-11
 
+Status: active
+
+When the work this file hands over is finished, change the Status line to `done`; when it is dropped, to
+`dropped`.
+
 First, check this file against reality: `git status` and `git log -3`, whether the processes under "In flight"
 still run, whether the files named here exist. Tell the user what differs before doing anything else.
 
@@ -390,20 +396,31 @@ Waiting on the user: cli.py:21 crashes without notes.json - a separate bug, not 
 Rollback: the work started from commit adb43c6; `git checkout -- store.py tests/test_store.py`.
 ```
 
-The first paragraph matters most: the file goes stale as soon as anything changes between sessions, and it can
+The paragraph that checks the file against reality matters most: the file goes stale as soon as anything changes between sessions, and it can
 be wrong itself. In a test where the fix was reverted behind its back, the next session opened with "the
 handoff differs from the repository" and asked before doing anything.
 
+The `Status` line works as in a plan: `active` until the work the file hands over is finished (`done`) or dropped
+(`dropped`); the sentence under it tells the session that finishes the work to change it. The [hooks](#hooks) name
+an active handoff file with its date when a session starts, and the agent reads it only when you ask to continue
+that work - "let's continue" is enough; after a compaction they name it again, so that a session working from it
+reads its traps and decisions again. A file without a `Status` line, written by an earlier version, is not named.
+The decisions of a handoff file marked `done` count for `grill` as earlier decisions, like those of an accepted
+plan.
+
 ## Hooks
 
-The Claude Code plugin carries one small script (`scripts/context_hooks.py`, Python standard library only, reads
-files and writes none) on two events:
+Both plugins carry the same small script (`scripts/context_hooks.py`, Python standard library only, reads files
+and writes none). The Claude Code plugin runs it on two events:
 
 | Event | What the script prints | Where it goes |
 |---|---|---|
-| `PreCompact` | a request to keep five things under their own headings (below), and the paths of the active plans | into the instructions for the compaction summary |
-| `SessionStart` after a compaction | every plan in `.tmp/plans/` with `Status: active`, in full (the newest three, up to 8000 characters; a longer one by path, with a request to read it) | into the context of the session |
-| `SessionStart` of a new or resumed session | one line per active plan: its path and when it was last changed | into the context of the session |
+| `PreCompact` | a request to keep five things under their own headings (below), and the paths of the active plans and handoff files | into the instructions for the compaction summary |
+| `SessionStart` after a compaction | every plan in `.tmp/plans/` with `Status: active`, the newest three in full, as long as the whole output fits both hosts' limits (9500 UTF-16 units for Claude Code, 19,000 bytes of UTF-8 for Codex); while it does not, the largest gives way to its path with a request to read it; the newest three active handoff files in `.tmp/handoff/` by path, with a request to read its traps and decisions again if the session works from it | into the context of the session |
+| `SessionStart` of a new or resumed session | one line per active plan and per active handoff file, the newest three of each: its path and when it was last changed, and that the agent reads it only when you ask to continue that work | into the context of the session |
+
+The Codex plugin runs it on `SessionStart` only, with the same output: Codex ignores what a `PreCompact` hook prints
+(see [Codex](#codex)).
 
 What the summary is asked to keep, and why. In 24 compactions of one real project the agent went back to the
 session transcript 33 times afterwards; this is what it went for, plus what a summary blurs:
@@ -419,7 +436,8 @@ Not asked for, on purpose: the state of the disk (git can be asked again, and no
 since the summary), the text of the plan (it comes back in full), project rules (reloaded by Claude Code).
 
 - The plans are looked for in every `.tmp/plans/` from the session directory up to the repository root.
-- The first `Status:` line of a plan decides; a later one is taken for a quote.
+- Only the first line of text under the title counts as the `Status:` line, written plainly or in bold; a quote,
+  a heading, a list item or a line further down is not the file's own status.
 - With your own instructions in `/compact <instructions>` the `PreCompact` hook prints nothing.
 - A plan left `active` comes back after every compaction and is named at every start: it is closed when you
   accept the result.
@@ -428,7 +446,9 @@ since the summary), the text of the plan (it comes back in full), project rules 
   is not broken: with and without it a resume read the same 15,080 tokens from the cache.
 - If the project has compaction hooks of its own, these run next to them, not instead.
 - Checked in a live session: after `/compact` the summary had the extra headings after the standard ones, and
-  the model named the plan's path and a marker word from it without reading any file.
+  the model named the plan's path and a marker word from it without reading any file. In a live Codex session
+  the model named the active plan and handoff file with their dates, and what it was told to do with each, without
+  running a command or reading a file.
 - Not measured: whether the extra headings make the work after a compaction better. A repeated correction is
   not cured by keeping its text: in the same project one was in the summary 8 times out of 9 and had to be said
   again anyway.
@@ -442,6 +462,9 @@ codex plugin marketplace add ilkruglov/duck_factory
 codex plugin add duck-factory@duck-factory
 ```
 
+Then open `/hooks` in Codex and trust the plugin's hook: Codex does not run it before that, and asks again when an
+update changes the script.
+
 What differs from the Claude Code version:
 
 | | Claude Code | Codex |
@@ -452,7 +475,7 @@ What differs from the Claude Code version:
 | enhanced | `high` + Codex with the brief + adversarial Codex + plan check | one adversarial pass instead of the general one + plan check |
 | Large change | `high` + Codex with the brief + adversarial Codex, each on the whole change | one sub-agent per group of files |
 | Final review | Codex and a fresh Claude subagent per group of files, same brief, + adversarial Codex | one sub-agent per group of files |
-| Simplification at the end | Codex lists, the agent filters the list and adds its own | the agent alone |
+| Simplification at the end | Codex lists, the agent filters the list and adds its own | a fresh sub-agent lists, the agent filters the list and adds its own |
 | Questions in `grill` | the question dialog, up to 4 per round | by mode: in Plan mode `request_user_input` (up to 3 questions, 2-3 options), outside it `request_user_input_async` or `send_message_to_user_async` and always written out in the final message (up to 4), else text |
 | The boundary of the work in the plan | a `Not touching` section | a `Scope` section: what the work covers (the Codex model does not write what stays unchanged) |
 | Domain skills in `grill` | loaded with the Skill tool | their `SKILL.md` is read |
@@ -460,7 +483,7 @@ What differs from the Claude Code version:
 | The security pass, after your yes | a Codex task (without Codex, a subagent), asked about with AskUserQuestion while the other checks run; in a headless run, at the end of the report | a sub-agent, asked about at the end of the report |
 | `handoff` is manual through | `disable-model-invocation` | `agents/openai.yaml`, `allow_implicit_invocation: false` |
 | `Critical paths` and `Security paths` are listed in | the project's `CLAUDE.md` | the project's `AGENTS.md` |
-| The plan after a compaction | brought back by the hooks | the skill's instruction to re-read the plan with `Status: active`; no hooks |
+| Hooks | `PreCompact` asks the summary to keep five things; `SessionStart` names plans and handoff files and brings the plan back after a compaction | `SessionStart` only, once you trust it in `/hooks`: Codex ignores what `PreCompact` prints; `additionalContextLimit` 5000, as Codex counts a token as 4 bytes of UTF-8 and the default 2500 is too few for a plan in full |
 
 Why one pass and not two in the enhanced tier. On two benchmarks (three seeded bugs in a 581-line diff, four
 seeded bugs of other kinds in a 4-line diff) the adversarial brief found exactly the bugs the general brief
@@ -572,6 +595,8 @@ A new version loads in the next Claude Code session.
 - Tested on Linux with Claude Code and Opus-class models; the tier measurement used one repository and bugs of
   one kind (path and environment selection logic). The numbers in this file come from those earlier benches, not
   from the synthetic project in `evals/`.
+- The Codex hook is not checked on native Windows: Codex may run its command through `cmd.exe`, which does not
+  expand `${PLUGIN_ROOT}`.
 - The hooks need the plan to carry `Status: active`; a plan written by a version before 0.2.0 has no such line
   and is not brought back until you add it.
 - In a headless run (`claude -p`) the question dialog is not available, and `grill` asks in text instead.
