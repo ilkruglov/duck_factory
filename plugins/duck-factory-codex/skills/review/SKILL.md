@@ -226,13 +226,14 @@ security pass, are fixed after the user has seen them and said yes. In this orde
 When a round leaves nothing left to fix, or the user accepts what is left as limits, the work ends with these two
 steps, once for the whole work:
 
-4. Simplify the code this change touched: remove duplication, abstractions that have one user, dead code and
-   leftovers of the fixes. Do not change behaviour and do not widen the diff to code the change did not touch. For
-   the text of skills, prompts and docs in the change, one sub-agent with `fork_turns="none"` does this step instead:
-   it looks for rules repeated or contradicting each other within the text, between mirrored versions and with the
-   README, rules longer than an agent needs, and instructions that make an agent do needless calls and reads; you
-   apply what it finds without changing what the rules say. Keep the list of the places this step changed, each with
-   its text before and after, taken from your edits.
+4. Simplify the change yourself, in this context, without starting agents. Go through the diff for: reuse - code that
+   re-implements a helper the codebase already has; simplification - duplication, state that can be derived,
+   abstractions with one user, dead code and leftovers of the fixes; efficiency - repeated reads and computation;
+   altitude - a special case where the general rule should change. In the text of skills, prompts and docs look for
+   rules repeated or contradicting each other within the text, between mirrored versions and with the README, rules
+   longer than an agent needs, and instructions that make an agent do needless calls and reads. Apply what does not
+   change behaviour and does not widen the diff to code the change did not touch. Keep the list of the places this
+   step changed, each with its text before and after, taken from your edits.
 5. The project's tests, then one sub-agent with `fork_turns="none"` and the repeat brief for the places the
    simplification changed, with their text before and after and the bracketed check.
 

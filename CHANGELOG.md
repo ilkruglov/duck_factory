@@ -5,6 +5,28 @@ Codex (`plugins/duck-factory-codex`) - carry the same version since 0.2.0, excep
 Code plugin only. The commit messages hold the measurements and the reasons in full. Russian:
 [CHANGELOG.ru.md](CHANGELOG.ru.md).
 
+## 0.4.2 - 2026-11-24
+
+- In Claude Code, `review` runs a new set of reviewers, chosen on a measurement on two real changes with 22 important
+  bugs known from later fixes, every finding checked against the code. Codex always gets the skill's brief, for the
+  whole change, instead of running its own review; from the normal tier Codex's adversarial review runs alongside,
+  with a focus the agent writes from the diff; Claude's side is the built-in `/code-review` on the whole change -
+  `low` for a light change, `medium` for a normal one, `high` for an enhanced one or one in several groups. Claude
+  subagents per group of files run only in a final review now. Together the three found 19 of the 22 important bugs
+  with 12.4M Claude tokens; the previous setup for a large change found 18 with 81.5M. The Codex task with the
+  brief for the whole change has 30 minutes instead of 15: on a large change it takes longer.
+- In a repeat round the Claude subagent runs at effort `medium`. Claude subagents start without a model, so
+  they run on the session's model. Without Codex the built-in review goes one level up
+  (`high` stays `high`), and outside a final review a change in several groups also gets one Claude subagent with
+  the brief for the whole change.
+- The simplification step at the end of `review` no longer starts `/simplify`. In Claude Code, Codex lists
+  simplifications without changing anything while the agent goes through the diff itself; the agent drops what is
+  only taste, changes behaviour or touches code outside the change, and applies the rest with its own. In Codex the
+  agent does it alone. The directions are those of `/simplify` - reuse, duplication and dead code, repeated work,
+  special cases where a general rule should change - and, in the text of skills and docs, rules repeated or
+  contradicting each other. On two finished changes Codex and the agent together found 31 of 37 real
+  simplifications; `/simplify` found 17 for four times the Claude tokens and changed behaviour in one of the two changes.
+
 ## 0.4.1 - 2026-11-23
 
 Shorter repeat rounds in `review`. In one project two tasks went through 18 review rounds in two days, 30 to 60

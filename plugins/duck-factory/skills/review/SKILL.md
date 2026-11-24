@@ -1,6 +1,6 @@
 ---
 name: review
-description: Use after finishing a code change, before the report and before a commit - the one code review to run. Picks its own depth from measured size, blast radius and reversibility, runs the built-in /code-review and Codex in parallel (on a large change, Codex and a fresh Claude subagent per group of files) plus a check against the plan, verifies each finding, and reports. Also before a pull request, a merge or a release, as a final review of everything since the work started, and for "review this", "check with Codex", a second opinion on a diff. It only finds - fixes come after the user agrees. Not for changes to docs or comments only; a data or config file that the project's code reads counts as code.
+description: Use after finishing a code change, before the report and before a commit - the one code review to run. Picks its own depth from measured size, blast radius and reversibility, runs in parallel the built-in /code-review, Codex with the skill's brief and, from the normal tier, Codex's adversarial review (in a final review, Codex and a fresh Claude subagent per group of files) plus a check against the plan, verifies each finding, and reports. Also before a pull request, a merge or a release, as a final review of everything since the work started, and for "review this", "check with Codex", a second opinion on a diff. It only finds - fixes come after the user agrees. Not for changes to docs or comments only; a data or config file that the project's code reads counts as code.
 argument-hint: "[enhanced | max] [path to the plan]"
 ---
 
@@ -62,10 +62,10 @@ steps meet shows only when both are in view.
 | Tier | When | Built-in | Codex | Plan check |
 |---|---|---|---|---|
 | none | no code lines at all | - | - | - |
-| light | up to 50 code lines, 1 file, up to 5 call sites, no one-way door | `low` | review | no |
-| normal | everything else | `medium` | review | yes |
-| enhanced | a one-way door, or a critical path, or over 10 files, or over 20 call sites, or the user asked | `high` | adversarial, with a focus | yes |
-| final | a final review (step 1): the tier the table gives for the whole change, at least normal | - (step 2) | per group (step 2) | yes |
+| light | up to 50 code lines, 1 file, up to 5 call sites, no one-way door | `low` | the group brief | no |
+| normal | everything else | `medium`; `high` with more than one group | the group brief and adversarial, with a focus | yes |
+| enhanced | a one-way door, or a critical path, or over 10 files, or over 20 call sites, or the user asked | `high` | the group brief and adversarial, with a focus | yes |
+| final | a final review (step 1): the tier the table gives for the whole change, at least normal | - (step 2) | per group (step 2), and adversarial since the base | yes |
 | repeat | after fixes from the previous round | - | the repeat brief, with a Claude subagent (step 5) | no |
 
 A one-way door outweighs every other sign. In doubt between two tiers, take the higher. `max` only when the user
@@ -84,9 +84,10 @@ For tier "none" say so in one line and stop; only the security pass may follow (
 
 ### Groups
 
-At the normal and enhanced tiers, and in a final review, split the change into groups and give each group its own
-reviewers. Every changed file goes to a group: the code files by subsystem - the same directory or module together
-- and each test with the code it tests, or with the nearest group. How many groups, counted by code lines and code
+At the normal and enhanced tiers, and in a final review, split the change into groups: they set the level of the
+built-in review (the tier table), the reviewers of a final review (step 2) and those of a repeat round (step 5).
+Every changed file goes to a group: the code files by subsystem - the same directory or module together - and each
+test with the code it tests, or with the nearest group. How many groups, counted by code lines and code
 files:
 
 | Change | Groups |
@@ -105,11 +106,11 @@ review's folder with `mkdir -p .tmp/review && mktemp -d .tmp/review/XXXXXX` and 
 `<path>` is the absolute path of the repository and `<base>` is the commit hash of `HEAD`, or in a final review the
 base from step 1.
 
-**With one group** (light, and normal or enhanced that fit in one group) run the built-in review and Codex as below;
-**with several groups, or in a final review**, the reviewers in "Reviewers per group".
+**Outside a final review** run the built-in review and Codex as below, each on the whole change; **in a final review**,
+the reviewers in "Reviewers per group" and Codex's adversarial review.
 
-**Built-in review.** Skill tool, skill `code-review`, args `<level> <absolute path of the repository root>`.
-Never with `--fix`.
+**Built-in review.** Skill tool, skill `code-review`, args `<level> <absolute path of the repository root>`, the level
+from the tier table, or `max` when the user asked for it. Never with `--fix`.
 
 **Codex.** Find the plugin (the path changes with its version):
 
@@ -119,26 +120,32 @@ claude plugin list --json | node -e 'let s="";process.stdin.on("data",d=>s+=d).o
 
 It prints the plugin's path. Shell variables do not survive between Bash calls: put that path in place of
 `<CODEX_ROOT>` into every command below. Every Codex command runs under `timeout 900` (15 minutes; `gtimeout` from
-coreutils on macOS). When it ends by the timeout, the Codex job may still run behind the helper: find it with
+coreutils on macOS), and the task with the brief for the whole change under `timeout 1800`: on a large change it
+takes longer than 15 minutes. When it ends by the timeout, the Codex job may still run behind the helper: find it with
 `codex-companion.mjs status` and stop it with `codex-companion.mjs cancel <job-id>`, then report that reviewer as
 not finished.
 
 From the repository root, in the background (`run_in_background: true`):
 
-- light, normal: `timeout 900 node "<CODEX_ROOT>/scripts/codex-companion.mjs" review --wait --scope working-tree`
-- enhanced: `timeout 900 node "<CODEX_ROOT>/scripts/codex-companion.mjs" adversarial-review --wait --scope working-tree '<focus>'`
+- every tier, outside a final review: the group brief below for the whole change - all its files are the reviewer's
+  part - written to `.tmp/review/<run>/codex.md` (never put it into the command line: it has backticks, and the shell
+  would run them):
+  `timeout 1800 node "<CODEX_ROOT>/scripts/codex-companion.mjs" task --fresh --prompt-file .tmp/review/<run>/codex.md`
+- normal and enhanced, and alongside it: `timeout 900 node "<CODEX_ROOT>/scripts/codex-companion.mjs" adversarial-review --wait --scope working-tree '<focus>'`;
+  in a final review `adversarial-review --wait --base <base> '<focus>'`, which sees only the commits since the base:
+  say so when the change has uncommitted files.
   The focus names what this diff puts at risk, from its content: error handling and silent failures, concurrency
   and ordering, the migration and its rollback, whether the tests would fail without the change, the contracts of
   external APIs and libraries the code relies on.
   The focus goes in single quotes, with no single quote, backtick or `$` inside it.
 
-Codex runs the model and reasoning effort from its own configuration (`~/.codex/config.toml`, a trusted project's
-`.codex/config.toml`, and `review_model` for its native review); do not pass a model. The
-output ends with a `# Codex Review` or `# Codex Adversarial Review` block. A working-tree review covers
-every uncommitted file, including changes that are not yours: say so when such files are in `git status`.
+Codex runs the model and reasoning effort from its own configuration (`~/.codex/config.toml` and a trusted project's
+`.codex/config.toml`); do not pass a model. The adversarial review's output ends with a `# Codex Adversarial Review`
+block. Outside a final review both cover every uncommitted file, including changes that are not yours: say so when
+such files are in `git status`.
 
-**Reviewers per group.** For each group start two reviewers, both with the group brief below, all of them in one
-message. Codex: write the brief to `.tmp/review/<run>/group-<number>.md` - never put it into the command line: it has
+**Reviewers per group** (a final review). For each group start two reviewers, both with the group brief below, all of
+them in one message. Codex: write the brief to `.tmp/review/<run>/group-<number>.md` - never put it into the command line: it has
 backticks, and the shell would run them - and run in the background (several such tasks run in parallel):
 
 ```bash
@@ -210,13 +217,15 @@ timeout 900 node "<CODEX_ROOT>/scripts/codex-companion.mjs" task --fresh --promp
 A limit, no login, a model error or `[codex] Turn failed.`: do not retry and never switch the model. Say it in one line with the reason as Codex gave it, and for the rest of this session review
 with Claude only:
 
-- the built-in review goes one level up (`low` to `medium`, `medium` to `high`);
-- with groups, only the Claude subagents review them;
+- the built-in review goes one level up (`low` to `medium`, `medium` to `high`; `high` stays `high`);
+- outside a final review, with more than one group, also one Claude subagent with a fresh context and the group brief
+  for the whole change;
+- in a final review, only the Claude subagents review the groups;
 - the plan check and the security pass are done by a subagent with a fresh context and the same brief;
 - do not call Codex again in this session unless the user says it is back.
 
 If the Codex plugin is not enabled in this project, that is the same case. A Codex reviewer that has given nothing
-in 15 minutes is stopped and reported as not finished; that alone does not make Codex unavailable.
+in its time limit is stopped and reported as not finished; that alone does not make Codex unavailable.
 
 ## 3. Verify the findings
 
@@ -241,13 +250,13 @@ In this order, and nothing before it but the tier line and, with several groups,
    its level. Each: what breaks and on what input,
    `file:line` and the places where the same logic repeats, the mark from step 3, who found it.
 2. **Plan check**: missing, extra, unchecked criteria - or that it was skipped and why.
-3. **Quality notes**: briefly; `/simplify` will take most of them.
+3. **Quality notes**: briefly; the simplification step will take most of them.
 4. **Not confirmed**: one line each, so the user can disagree.
 
 Then what was not covered: tests not run, platforms not checked, Codex unavailable, the security pass skipped.
 
 End with the open questions, numbered, so that one yes cannot answer two: the security pass, when it is offered in
-text (step 2); fix the confirmed bugs and run `/simplify`, when there is anything to fix or simplify; each finding
+text (step 2); fix the confirmed bugs and simplify, when there is anything to fix or simplify; each finding
 that is a decision rather than a bug (a trade-off, a change of behaviour), as its own question. With a yes to the
 security pass and to the fixes, the pass runs first.
 
@@ -262,7 +271,8 @@ security pass, are fixed after the user has seen them and said yes. In this orde
    places: file:line and what was fixed.
 2. The project's full test suite once, after all the fixes of the round.
 3. A **repeat** review of the fixes with the repeat brief below: one Codex task and a Claude subagent with a fresh
-   context for each group where something was fixed (step 1, "Groups"), with that group's places - all of them when
+   context at effort `medium` (Agent tool, `effort: "medium"`) for each group where something was fixed (step 1,
+   "Groups"), with that group's places - all of them when
    they are in one group. A fixed place outside the change goes with the group of the code it belongs to, or the
    nearest one; with no groups (the light tier) all the places are one group, number 1. Write each Codex brief to
    `.tmp/review/<run>/repeat-<group number>.md` and run it in the background:
@@ -277,12 +287,27 @@ security pass, are fixed after the user has seen them and said yes. In this orde
 When a round leaves nothing left to fix, or the user accepts what is left as limits, the work ends with these two
 steps, once for the whole work:
 
-4. `/simplify` (Skill tool, skill `simplify`) for the code. It applies its fixes through your own edits; check them
-   against `git diff` afterwards. For the text of skills, prompts and docs in the change, one subagent with a fresh
-   context does this step instead: it looks for rules repeated or contradicting each other within the text, between
-   mirrored versions and with the README, rules longer than an agent needs, and instructions that make an agent do
-   needless calls and reads; you apply what it finds without changing what the rules say. Keep the list of the places
-   this step changed, each with its text before and after, taken from those edits.
+4. Simplify the change: Codex lists simplifications, and you go through the diff yourself meanwhile. The directions,
+   for both: reuse - code that re-implements a helper the codebase already has; simplification - duplication, state
+   that can be derived, abstractions with one user, dead code and leftovers of the fixes; efficiency - repeated reads
+   and computation; altitude - a special case where the general rule should change; in the text of skills, prompts and
+   docs, rules repeated or contradicting each other within the text, between mirrored versions and with the README,
+   rules longer than an agent needs, and instructions that make an agent do needless calls and reads. Write to
+   `.tmp/review/<run>/simplify-find.md`: "Find simplifications in the change in the repository at `<path>` since
+   `<base>` (`git diff <base>`, uncommitted files included; new files: `git ls-files -o --exclude-standard`). Do not
+   change any files. Look for: `<the directions above>`. Report only changes that keep behaviour and stay inside the
+   change, each separately: file:line, what to change, why the behaviour stays the same. Number them. Answer in
+   <the user's language>." Run it in the background:
+
+   ```bash
+   timeout 900 node "<CODEX_ROOT>/scripts/codex-companion.mjs" task --fresh --prompt-file .tmp/review/<run>/simplify-find.md
+   ```
+
+   Then go through the diff yourself for the same directions. From Codex's list drop taste - a rewrite with no real
+   gain, such as savings on a path that rarely runs - and anything that changes behaviour or touches code the change
+   did not touch; check each remaining item against the code. Apply those and your own. Without Codex, the step is
+   yours alone. Keep the list of the places this step changed, each with its text before and after, taken from your
+   edits.
 5. The project's tests, then one Codex task (without Codex, a Claude subagent with a fresh context) with the repeat
    brief for the places the simplification changed, with their text before and after and the bracketed check. Write
    the Codex brief to `.tmp/review/<run>/simplify.md` and run it in the background:
@@ -316,6 +341,7 @@ inputs will keep failing, listed, if it stays as it is. The same goes for every 
 ## Rules
 
 - During the review change nothing but files in `.tmp/`.
+- Start every Claude subagent of this skill without the `model` parameter: it then runs on the session's model.
 - The tools you run write into the project too: `uv run` leaves `uv.lock` and `.venv`, a test run leaves caches.
   Before the report compare `git status --short` with the one from step 1, remove what the review itself created
   outside `.tmp/`, and name it in the report. Leave alone everything that was there before.

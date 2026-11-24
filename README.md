@@ -10,7 +10,7 @@ the result once with a depth that fits the change, and hand the work over to a f
 | Skill | When it runs | What it does |
 |---|---|---|
 | `grill` | by itself, before a non-trivial task, with or without code; or `/duck-factory:grill` | When you approved a list wholesale or the task was the agent's idea, asks first which of it to do at all; then interviews you in short rounds through the question dialog, recommended option first, and writes a one-page plan to `.tmp/plans/`. A large plan that changes code is checked by Codex before any code. |
-| `review` | by itself, after a finished code change; or `/duck-factory:review` | Measures the change (code lines, files, call sites, reversibility), picks a tier, runs the built-in `/code-review` and Codex in parallel (on a large change, a Codex and a Claude reviewer per group of files) plus a check against the plan, verifies every finding, and reports. Also as a final review of all the work before a pull request, a merge or a release; a security pass when you say yes. It only finds; fixes come after you agree. |
+| `review` | by itself, after a finished code change; or `/duck-factory:review` | Measures the change (code lines, files, call sites, reversibility), picks a tier, runs in parallel the built-in `/code-review`, Codex with the skill's brief and, from the normal tier, Codex's adversarial review (in a final review, a Codex and a Claude reviewer per group of files) plus a check against the plan, verifies every finding, and reports. Also as a final review of all the work before a pull request, a merge or a release; a security pass when you say yes. It only finds; fixes come after you agree. |
 | `handoff` | only on `/duck-factory:handoff` | Writes `.tmp/handoff/<slug>.md` so a fresh session can continue: goal, constraints, decisions, what is done and how it was checked, what is in flight, the next step, rollback. The file starts by telling the next session to check it against reality. |
 
 ## The pipeline
@@ -19,7 +19,7 @@ the result once with a depth that fits the change, and hand the work over to a f
 2. You approve the plan; the work goes test first.
 3. `review` runs once, before the report or a commit.
 4. After you agree: a failing test and a fix for each confirmed bug, the tests, and a short repeat review of the
-   fixes only; `/simplify` once, at the end.
+   fixes only; simplification once, at the end, by Codex and the agent.
 5. `handoff` when the work continues in another session.
 
 Nothing here replaces your approval: `grill` changes nothing until you confirm, the plan is not consent to start
@@ -122,11 +122,11 @@ The skill measures everything uncommitted (modified, staged and new files) and p
 | Tier | When | Built-in review | Codex | Plan check |
 |---|---|---|---|---|
 | none | no code lines changed | - | - | - |
-| light | up to 50 code lines, 1 file, up to 5 call sites, reversible | `low` | review | no |
-| normal | everything else | `medium` | review | yes |
-| enhanced | a one-way door, a critical path, over 10 files, over 20 call sites, or you asked | `high` | adversarial, with a focus | yes |
-| final | a final review (below): the tier of the whole change, at least normal | - | per group | yes |
-| repeat | after fixes | - | a short brief on the fixes only, Codex and a Claude subagent (below) | no |
+| light | up to 50 code lines, 1 file, up to 5 call sites, reversible | `low` | the brief | no |
+| normal | everything else | `medium`; `high` with more than one group | the brief and adversarial, with a focus | yes |
+| enhanced | a one-way door, a critical path, over 10 files, over 20 call sites, or you asked | `high` | the brief and adversarial, with a focus | yes |
+| final | a final review (below): the tier of the whole change, at least normal | - | per group, and adversarial since the base | yes |
+| repeat | after fixes | - | a short brief on the fixes only, Codex and a Claude subagent at `medium` (below) | no |
 
 A one-way door outweighs the other signs; `max` only when you ask for it by name. The tier comes from the table
 and nothing else: "this is the core of the system" does not raise it - that is what the list of critical paths
@@ -146,18 +146,40 @@ cell):
 rather than missed bugs; `low` is enough for a small change and loses a bug in a large one. The call-site
 thresholds are a cautious guess, not a measurement.
 
+Why these reviewers. They come from a second measurement, on two real changes from the owner's projects (a Rust
+desktop app, about 2,700 changed lines, and a TypeScript service, about 700 lines and 37 new files) with their bugs
+known from later fixes; every finding was then checked against the code, and the real bugs sorted into important
+ones (a crash, a broken function, lost or wrong data, money, privacy) and minor ones. One run per variant, 22
+important bugs in all:
+
+| Reviewers | Important bugs found | Claude tokens |
+|---|---|---|
+| Codex with the brief + its adversarial review + built-in `high` | 19 | 12.4M |
+| Codex with the brief + a Claude subagent per group (the earlier setup) | 18 | 81.5M |
+| Codex's own review + built-in `medium` (the earlier setup for one group) | 12 | 6.4M |
+| Codex with the brief alone | 15 | - |
+| Codex's own review alone | 10 | - |
+| Codex's adversarial review alone | 8 | - |
+
+The Claude subagents per group found more minor bugs (16 against 9 of 22) at six and a half times the tokens, so
+they stay for the final review only. The adversarial review alone is the weakest, but it found an ordering bug no
+other reviewer did, in five minutes and without Claude tokens. With one Claude reviewer, effort `xhigh`, `high`
+and `medium` found the same important bugs; `medium` used half the tokens.
+
 ### What the checks are
 
 - **Built-in review**: Claude Code's `/code-review` at the tier's level. It also checks the diff against your
   `CLAUDE.md`.
-- **Codex**: a second opinion from another model, through the `codex@openai-codex` plugin. In the enhanced tier
-  it runs as an adversarial review with a focus taken from the diff: silent failures, ordering and concurrency,
-  the migration and its rollback, whether the tests would fail without the change.
+- **Codex**: a second opinion from another model, through the `codex@openai-codex` plugin, as a task with the brief
+  below for the whole change. From the normal tier its adversarial review runs alongside, with a focus taken from
+  the diff: silent failures, ordering and concurrency, the migration and its rollback, whether the tests would fail
+  without the change.
 - **Plan check**: what the plan asked for and is missing, what was done beyond the plan, which acceptance
   criteria nothing checks. It uses the plan `grill` wrote in this session, or one named in the handoff file or
   passed as an argument; with no plan it is skipped, and the report says so.
 
-All of them run in parallel.
+All of them run in parallel. Claude subagents start without a `model`, so they run on the session's model; a
+default model for subagents set in Claude Code's settings would replace it.
 
 ### Final review and groups
 
@@ -172,13 +194,14 @@ against the code: half of them were two code paths, written in different steps, 
   the tier table, at least normal, and always runs in groups.
 - **Groups.** At the normal and enhanced tiers every changed file goes to a group: code by subsystem, each test with
   the code it tests. One group under 100 code lines or for 1-2 files, two under 500 lines, then one per three files
-  rounded up, from two to four. Briefs go to Codex as files (`--prompt-file`), never on the command line, where the
-  shell would run their backticks. Each group gets Codex (a `task` with the brief below) and a fresh Claude subagent
-  with the same brief, all in parallel; the built-in `/code-review` does not run then: it takes the whole uncommitted
-  diff, not a group and not the commits since a base (with `max` it still runs, on the whole change). With one group
-  an ordinary review stays as it was, and the brief reaches no one: the built-in `/code-review` checks the rules of
-  `CLAUDE.md` itself, and Codex's own review takes no brief. Each review keeps its briefs in a folder of its own, so
-  that two reviews in one worktree do not overwrite each other's.
+  rounded up, from two to four. Outside a final review the groups only set the level of the built-in review
+  (`high` with more than one group) and the pairs of a repeat round; Codex gets the brief for the whole change. In a
+  final review each group gets Codex (a `task` with the brief below) and a fresh Claude subagent with the same brief,
+  all in parallel, plus Codex's adversarial review with `--base`, which sees the commits only; the built-in
+  `/code-review` does not run then: it takes the whole uncommitted diff, not a group and not the commits since a base
+  (with `max` it still runs, on the whole change). Briefs go to Codex as files (`--prompt-file`), never on the command
+  line, where the shell would run their backticks. Each review keeps its briefs in a folder of its own, so that two
+  reviews in one worktree do not overwrite each other's.
 - **The brief** asks each reviewer to read the project's rules (the instruction files Claude Code or Codex would load
   for its files: `CLAUDE.md`, `AGENTS.md`, `.claude/rules/` and the like) and report a change that breaks them; to
   read its files in full, not only the changed lines; to follow every new type, value, message or command across a
@@ -219,7 +242,7 @@ None.
 
 Not covered: the real server was not started; case-insensitive file systems were not checked.
 
-Fix the confirmed bug and run /simplify?
+Fix the confirmed bug and simplify?
 ```
 
 A finding that is a decision rather than a bug goes to you as its own question, not into the fix list.
@@ -260,14 +283,19 @@ report names where the same logic repeats, such as the other version of a mirror
 anywhere else goes to you first; then the project's full test suite once; then a repeat review of the fixes only. The
 agent keeps the list of fixed places, and the repeat has its own short brief: those places, the code that calls them,
 the code they call and their tests - not the whole change again. In Claude Code it is one Codex task and one Claude
-subagent for all the fixes (without Codex, the subagent alone); when the fixes are in several groups, that pair goes
+subagent at effort `medium` for all the fixes (without Codex, the subagent alone); when the fixes are in several groups, that pair goes
 to every group where something was fixed. In Codex it is one sub-agent the same way.
 
-When a round leaves nothing to fix, or you accept what is left, the work ends once: `/simplify` for the code, and for
-the text of skills, prompts or docs one subagent instead, looking for rules repeated or contradicting each other
-(also between the two versions and the README), rules longer than an agent needs, and instructions that make an agent
-do needless calls; then the tests and one repeat review of what the simplification changed, checking that the
-behaviour stayed the same.
+When a round leaves nothing to fix, or you accept what is left, the work ends once with a simplification: Codex lists
+simplifications without changing anything while the agent goes through the diff itself - reuse, duplication and dead
+code, repeated work, special cases where a general rule should change, and in the text of skills and docs rules
+repeated or contradicting each other (also between the two versions and the README), rules longer than an agent
+needs and needless calls. The agent drops from Codex's list what is only taste and what changes behaviour or touches
+code outside the change, and applies the rest with its own; then the tests and one repeat review of what the
+simplification changed, checking that the behaviour stayed the same. In Codex the agent does it alone. On two
+finished, reviewed changes Codex found 23 real simplifications without Claude tokens, a Claude agent with the same
+directions 14, the two together 31 of 37; `/simplify` found 17 for four times the Claude tokens of the agent
+(65M against 14M, cache reads included) and in one of the two changed behaviour.
 
 Findings the previous round already reported and you already decided on are dropped, except one a fix was meant to
 remove and that is still there. If two rounds in a row find only edge cases in the same place, the skill stops and
@@ -281,8 +309,9 @@ after you have seen them and said yes.
 ### Without Codex
 
 A limit, no login or a model error: the skill does not retry and does not switch the model. (A Codex reviewer
-that has given nothing in 15 minutes is only stopped and reported as not finished.) It says so in one line, raises the built-in review one level (`low` to `medium`, `medium` to `high`),
-gives the plan check to a subagent with a fresh context, and does not call Codex again in that session unless
+that has given nothing in its time limit - 15 minutes, 30 for the brief on the whole change - is only stopped and reported as not finished.) It says so in one line, raises the built-in review one level (`low` to `medium`, `medium` to `high`; `high` stays),
+outside a final review adds one Claude subagent with the brief for the whole change when it has more than one group, gives the plan check
+to a subagent with a fresh context, and does not call Codex again in that session unless
 you say it is back.
 
 ### Time and cost
@@ -386,15 +415,16 @@ What differs from the Claude Code version:
 | | Claude Code | Codex |
 |---|---|---|
 | Who reviews | the built-in `/code-review` and Codex, two models | sub-agents of the same model, started with a fresh context (`fork_turns="none"`) |
-| light | `low` + Codex | one general pass |
-| normal | `medium` + Codex + plan check | one general pass + plan check |
-| enhanced | `high` + adversarial Codex + plan check | one adversarial pass instead of the general one + plan check |
-| Large change or final review | Codex and a fresh Claude subagent per group of files, same brief | one sub-agent per group of files |
+| light | `low` + Codex with the brief | one general pass |
+| normal | `medium` + Codex with the brief + adversarial Codex + plan check | one general pass + plan check |
+| enhanced | `high` + Codex with the brief + adversarial Codex + plan check | one adversarial pass instead of the general one + plan check |
+| Large change | `high` + Codex with the brief + adversarial Codex, each on the whole change | one sub-agent per group of files |
+| Final review | Codex and a fresh Claude subagent per group of files, same brief, + adversarial Codex | one sub-agent per group of files |
+| Simplification at the end | Codex lists, the agent filters the list and adds its own | the agent alone |
 | Questions in `grill` | the question dialog, up to 4 per round | by mode: in Plan mode `request_user_input` (up to 3 questions, 2-3 options), outside it `request_user_input_async` or `send_message_to_user_async` and always written out in the final message (up to 4), else text |
 | The boundary of the work in the plan | a `Not touching` section | a `Scope` section: what the work covers (the Codex model does not write what stays unchanged) |
 | Domain skills in `grill` | loaded with the Skill tool | their `SKILL.md` is read |
 | Plan check in `grill` | Codex, read-only | a sub-agent with a fresh context |
-| Simplification, once at the end | `/simplify` | a step inside the skill |
 | The security pass, after your yes | a Codex task (without Codex, a subagent), asked about with AskUserQuestion while the other checks run; in a headless run, at the end of the report | a sub-agent, asked about at the end of the report |
 | `handoff` is manual through | `disable-model-invocation` | `agents/openai.yaml`, `allow_implicit_invocation: false` |
 | `Critical paths` and `Security paths` are listed in | the project's `CLAUDE.md` | the project's `AGENTS.md` |
@@ -430,10 +460,10 @@ start the whole skill.
 
 ## Requirements
 
-- Claude Code with the built-in `/code-review` and `/simplify`.
+- Claude Code with the built-in `/code-review`.
 - For the second opinion and the plan check: the `codex@openai-codex` plugin, logged in. Without it `review`
   works with Claude only. Codex runs the model and reasoning effort from its own configuration:
-  `~/.codex/config.toml`, a trusted project's `.codex/config.toml`, and `review_model` for its native review.
+  `~/.codex/config.toml` and a trusted project's `.codex/config.toml`.
 - `python3` 3.9 or later on PATH: it runs the hooks.
 - `timeout` from coreutils (`gtimeout` on macOS): every Codex call runs under it.
 - Projects keep `.tmp/` in `.gitignore`: plans, handoff files and reproduction scripts go there.

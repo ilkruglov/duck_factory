@@ -335,6 +335,52 @@ def test_review_splits_a_large_change_into_groups_with_one_brief() -> None:
     assert "a Claude subagent" in claude and "task --fresh" in claude
 
 
+def test_review_runs_codex_with_the_brief_the_adversarial_review_and_the_built_in_on_the_whole_change() -> None:
+    """The reviewer set the review bench of 23.11 chose: Codex with the group brief always, its adversarial review from
+    the normal tier, the built-in review on the whole change - not Codex's own review, not Claude subagents per group
+    outside a final review."""
+    text = words(CLAUDE / "review" / "SKILL.md")
+    rows = {
+        row.split("|")[1].strip(): [cell.strip() for cell in row.split("|")[3:-1]]
+        for row in (CLAUDE / "review" / "SKILL.md").read_text(encoding="utf-8").splitlines()
+        if row.startswith("| ") and row.split("|")[1].strip() in ("light", "normal", "enhanced", "final", "repeat")
+    }
+    assert rows["light"][:2] == ["`low`", "the group brief"]
+    assert rows["normal"][:2] == [
+        "`medium`; `high` with more than one group",
+        "the group brief and adversarial, with a focus",
+    ]
+    assert rows["enhanced"][:2] == ["`high`", "the group brief and adversarial, with a focus"]
+    assert "adversarial since the base" in rows["final"][1]
+    assert 'codex-companion.mjs" review' not in text  # Codex's own review found 10 of 22 important bugs, our brief 15
+    assert "task --fresh --prompt-file .tmp/review/<run>/codex.md" in text  # the brief for the whole change
+    assert (
+        "adversarial-review --wait --scope working-tree" in text and "adversarial-review --wait --base <base>" in text
+    )
+    assert "sees only the commits" in text  # --base compares base...HEAD (lib/git.mjs of the Codex plugin)
+    per_group = between(text, "**Reviewers per group**", "> Review the changes")
+    assert "final review" in per_group
+    without = between(text, "### When Codex is not available", "## 3.")
+    assert "one Claude subagent with a fresh context and the group brief for the whole change" in without
+    repeat = between(text, "3. A **repeat**", "When a round leaves")
+    assert 'effort `medium` (Agent tool, `effort: "medium"`)' in repeat
+    # the brief for a whole large change took 11.8 and 15.1 minutes on the bench and was cut at 15 in a live run
+    assert (
+        'timeout 1800 node "<CODEX_ROOT>/scripts/codex-companion.mjs" task --fresh --prompt-file .tmp/review/<run>/codex.md'
+        in text
+    )
+    assert "its own brief" not in description(CLAUDE / "review" / "SKILL.md")  # read as Codex's own review
+    assert "every tier, outside a final review" in text  # a final review gives Codex a brief per group instead
+    assert "Outside a final review both cover every uncommitted file" in text  # --base sees the commits only
+    assert "`high` stays `high`" in without
+    assert "outside a final review, with more than one group, also one Claude subagent" in without
+    assert "With more than one group the built-in review runs at `high`" not in text  # said once, in the table
+    for readme in ("README.md", "README.ru.md"):
+        assert "review_model" not in (ROOT / readme).read_text(encoding="utf-8"), readme  # no native review runs
+    rules = between(text, "## Rules", "never go to")
+    assert "without the `model` parameter" in rules  # a subagent then runs on the session's model
+
+
 def test_codex_review_keeps_its_report_format() -> None:
     text = " ".join(
         (ROOT / "plugins" / "duck-factory-codex" / "skills" / "review" / "SKILL.md").read_text(encoding="utf-8").split()
@@ -382,7 +428,8 @@ def test_second_round_fixes_in_the_skills() -> None:
     claude = words(CLAUDE / "review" / "SKILL.md")
     assert "CODEX_ROOT=" not in claude  # the command prints the path, the agent puts it into every command
     launch = 'node "<CODEX_ROOT>/scripts/codex-companion.mjs"'
-    assert claude.count(launch) == claude.count("timeout 900 " + launch) > 0  # every Codex command has its limit
+    limited = claude.count("timeout 900 " + launch) + claude.count("timeout 1800 " + launch)
+    assert claude.count(launch) == limited > 0  # every Codex command has its limit
     assert "in single quotes" in claude  # the focus of an enhanced review: no backticks, no $
     assert "$CODEX_ROOT" not in words(CLAUDE / "grill" / "SKILL.md")
     assert "all the changed files" in words(CODEX / "review" / "SKILL.md")
@@ -418,7 +465,6 @@ def test_reviewers_read_the_project_rules_and_tests_fail_for_the_right_reason() 
 MIRRORED = (
     ("review", "> Review the changes in the repository", "Answer in"),
     ("review", "> Look for security vulnerabilities", "language>."),
-    ("review", "For the text of skills, prompts and docs in the change", "what the rules say."),
     ("review", "A yes covers", "In this order:"),
     ("review", "> Check the fixes just made", "Answer in"),
     ("review", "1. Each confirmed bug", "3. A **repeat**"),
@@ -433,7 +479,6 @@ MIRRORED = (
 TO_CODEX = (
     ("Claude Code would load", "Codex would load"),
     ("(`CLAUDE.md`, `AGENTS.md`, `.claude/rules/` and the like)", "(`AGENTS.md`, `AGENTS.override.md` and the like)"),
-    ("subagent with a fresh context does this step", 'sub-agent with `fork_turns="none"` does this step'),
     (
         "the next question you ask or",
         "the next question you ask (in Plan mode, where a question is one sentence, into the final message) or",
@@ -528,10 +573,23 @@ def test_claude_review_briefs_live_in_a_folder_of_their_own_run() -> None:
     assert ".tmp/review/<run>/group-<number>.md" in files  # a name with a space or a name like "security" is safe
 
 
-def test_text_is_reviewed_by_one_subagent_and_code_by_simplify() -> None:
-    fixes = between(words(CLAUDE / "review" / "SKILL.md"), "## 5.", "## Rules")  # Codex: see the mirror test
-    assert "`/simplify` (Skill tool, skill `simplify`) for the code" in fixes
-    assert "For the text of skills, prompts and docs in the change, one subagent" in fixes
+def test_simplification_runs_in_the_own_context_without_agents() -> None:
+    # On two reviewed changes /simplify found 17 real simplifications for 65M Claude tokens and applied a change of
+    # behaviour; Codex found 23 without Claude tokens, the agent alone 14, the two together 31 of 37.
+    for skills, start in ((CLAUDE, "4. Simplify the change"), (CODEX, "4. Simplify the change yourself")):
+        text = words(skills / "review" / "SKILL.md")
+        step = between(text, start, "5. The project's tests")
+        assert "`/simplify`" not in text, skills  # not the built-in skill
+        for angle in ("reuse", "simplification", "efficiency", "altitude", "rules repeated or contradicting"):
+            assert angle in step, (skills, angle)
+    codex = between(words(CODEX / "review" / "SKILL.md"), "4. Simplify the change yourself", "5. The project's tests")
+    assert "without starting agents" in codex
+    claude = between(words(CLAUDE / "review" / "SKILL.md"), "4. Simplify the change", "5. The project's tests")
+    assert "task --fresh --prompt-file .tmp/review/<run>/simplify-find.md" in claude  # Codex lists, changes nothing
+    assert "Do not change any files" in claude and "go through the diff yourself" in claude
+    for dropped in ("taste", "changes behaviour", "code the change did not touch"):
+        assert dropped in claude, dropped  # what the agent drops from Codex's list
+    assert "Without Codex, the step is yours alone" in claude
 
 
 def test_readmes_name_agents_md_for_codex_and_the_project_rules() -> None:
@@ -543,8 +601,8 @@ def test_readmes_name_agents_md_for_codex_and_the_project_rules() -> None:
         assert "`CLAUDE.md`" in cells[2] and "`AGENTS.md`" in cells[3], readme  # Claude Code, then Codex
     english = words(ROOT / "README.md")
     assert "reviewer to read the project's rules" in english
-    assert "`/code-review` checks the rules of `CLAUDE.md` itself" in english  # one group: no brief for Codex review
-    assert "and the brief reaches no one" in english  # said of an ordinary review with one group
+    assert "as a task with the brief below for the whole change" in english  # Codex gets the brief at every tier
+    assert "and the brief reaches no one" not in english
     for readme in ("README.md", "README.ru.md"):
         text = (ROOT / readme).read_text(encoding="utf-8")
         security = next(line for line in text.splitlines() if line.startswith("|") and "AskUserQuestion" in line)
@@ -593,7 +651,7 @@ def test_a_repeat_checks_only_the_fixes_and_simplify_runs_once() -> None:
     assert "a Claude subagent with a fresh context" in between(fixes, "5. The project's tests", "The repeat brief")
     assert "same reviewers per group" not in text  # no full review of every group after a fix
     codex = between(words(CODEX / "review" / "SKILL.md"), "## 5.", "## Rules")
-    assert codex.count('fork_turns="none"') >= 3  # every sub-agent of the step reads without the conversation
+    assert codex.count('fork_turns="none"') >= 2  # every sub-agent of the step reads without the conversation
 
 
 def test_grill_asks_to_commit_finished_work_before_a_new_task() -> None:
@@ -633,12 +691,13 @@ def test_the_changelog_check_takes_a_release_of_one_plugin_and_rejects_gaps() ->
     english, russian = ((ROOT / n).read_text(encoding="utf-8") for n in ("CHANGELOG.md", "CHANGELOG.ru.md"))
     at_021 = [text[text.index("## 0.2.1") :] for text in (english, russian)]  # the changelog as it stood at 0.2.1
     changelog_check(*at_021, ["0.2.1", "0.2.0"], "0.2.1")  # Claude Code ahead of Codex
+    top = changelog_entries(english)[0][0].split(" ")[0]
+    major, minor, patch = (int(n) for n in top.split("."))
+    bumped = f"{major}.{minor}.{patch + 1}"  # a version above every entry
     with pytest.raises(AssertionError):
-        changelog_check(english, russian, ["0.4.2", "0.4.2"], "0.4.2")  # a bump without an entry
+        changelog_check(english, russian, [bumped, bumped], bumped)  # a bump without an entry
     with pytest.raises(AssertionError):
-        changelog_check(
-            english, russian.replace("## 0.4.1 - 2026-11-23", "## 0.4.1 - 2026-11-21"), ["0.4.1"] * 2, "0.4.1"
-        )
-    empty = "## 0.4.2 - 2026-11-24\n\n"
+        changelog_check(english, russian.replace("## 0.4.1 - 2026-11-23", "## 0.4.1 - 2026-11-21"), [top] * 2, top)
+    empty = f"## {bumped} - 2026-12-01\n\n"
     with pytest.raises(AssertionError):
-        changelog_check(empty + english, empty + russian, ["0.4.2", "0.4.2"], "0.4.2")
+        changelog_check(empty + english, empty + russian, [bumped, bumped], bumped)
