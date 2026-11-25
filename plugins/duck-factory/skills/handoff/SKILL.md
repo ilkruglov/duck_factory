@@ -14,9 +14,10 @@ Write it in the user's language.
 
 ## Where
 
-`.tmp/handoff/<short-slug>.md` in the project (create the directory; `.tmp/` must be in `.gitignore` - if it is
-not, say so instead of editing `.gitignore`). If this work already has a handoff file - the user named one, or the
-session started from one - update that file in place instead of creating a second one.
+`.tmp/handoff/<short-slug>.md` in the project (create the directory; `.tmp/` must be in `.gitignore` - if it is not,
+say so instead of editing `.gitignore`). If this work already has a handoff file - the user named one, or the
+session started from one - update that file in place instead of creating a second one. If the named file does not
+exist, stop and ask whether the path is right, naming the active files in `.tmp/handoff/`.
 
 ## What goes in
 
@@ -53,9 +54,10 @@ Left to do: <in order>
 
 Next step: <the single first action for the new session>
 
-Traps: <what cost time here and how to avoid it; the user's corrections in this session>
+Traps: <what cost time here and how to avoid it; the user's corrections in this session - up to five, the costliest
+first>
 
-Waiting on the user: <open questions and decisions>
+Waiting on the user: <open questions and decisions - up to five, the most blocking first>
 
 Rollback: <the commit this work started from; what to delete or revert to get back to it>
 ```

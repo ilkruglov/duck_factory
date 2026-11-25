@@ -5,6 +5,22 @@ Codex (`plugins/duck-factory-codex`) - carry the same version since 0.2.0, excep
 Code plugin only. The commit messages hold the measurements and the reasons in full. Russian:
 [CHANGELOG.ru.md](CHANGELOG.ru.md).
 
+## 0.5.0 - 2026-11-26
+
+- `review` counts no asset as code: images (SVG too), fonts, media, archives and PDF no longer raise the tier, even
+  when the program loads them. Any other binary file - a `.wasm`, a script saved in UTF-16 - counts as a code file.
+- After a compaction the hook names a plan not changed for more than three days with its date instead of showing it
+  in full: it is likely left, and would take the context of every compaction.
+- `handoff` stops and asks when the file it was told to update does not exist, and keeps traps and open questions
+  to five each.
+- `grill` in Codex says once, as the interview starts outside Plan mode, that only in Plan mode (Shift+Tab switches
+  to it) do its questions come as a dialog that waits for the answers; outside it, in Codex 0.172, they come in text
+  or in a dialog that does not wait.
+- The repository checks itself: `pyproject.toml` pins pytest and ruff, `uv.lock` locks them, and GitHub Actions run
+  the tests, `ruff check` and `ruff format --check` on Python 3.12 and 3.14. The plugin needs Python 3.12 or later.
+  The requirements say how it runs on Windows. The measurements moved from the README to BENCH.md, and a test keeps
+  the numbers, tables, links and commands of the Russian texts in step with the English ones.
+
 ## 0.4.4 - 2026-11-25
 
 - In Codex, the simplification step at the end of `review` no longer rests on the author alone: a fresh sub-agent

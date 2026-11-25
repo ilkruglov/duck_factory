@@ -10,6 +10,7 @@ import re
 import subprocess
 import sys
 import time
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -43,28 +44,100 @@ def test_every_codex_skill_has_ui_metadata_and_handoff_is_manual() -> None:
     assert "disable-model-invocation: true" in (CLAUDE / "handoff" / "SKILL.md").read_text()
 
 
-def test_repository_is_english_only_except_the_russian_readme_and_changelog() -> None:
+def test_repository_is_english_only_except_the_russian_texts() -> None:
     files = subprocess.run(["git", "ls-files"], cwd=ROOT, capture_output=True, text=True, check=True).stdout.split()
+    russian = ("README.ru.md", "CHANGELOG.ru.md", "BENCH.ru.md")
     for name in files:
         text = (ROOT / name).read_text(encoding="utf-8")
-        assert name in ("README.ru.md", "CHANGELOG.ru.md") or not re.search("[\u0400-\u04ff]", text), name
+        assert name in russian or not re.search("[\u0400-\u04ff]", text), name
 
 
-def test_the_russian_readme_has_the_sections_and_commands_of_the_english_one() -> None:
-    english = (ROOT / "README.md").read_text(encoding="utf-8")
-    russian = (ROOT / "README.ru.md").read_text(encoding="utf-8")
-    for level in ("## ", "### "):
-        count = [sum(line.startswith(level) for line in text.splitlines()) for text in (english, russian)]
-        assert count[0] == count[1], level
-    commands = [line for line in english.splitlines() if line.startswith(("claude plugin", "codex plugin", "python3 "))]
-    assert commands
-    for command in commands:
-        assert command.split("  #")[0].rstrip() in russian, command
+SEPARATOR = "[.,\u00a0\u202f ]"  # 12.4M and 12,4M, 10,000 and 10 000 are the same number
+
+
+def number(token: str) -> str:
+    """12.4 and 12,4 are one number, 10,000, 10 000 and 10000 another: a group of three digits is thousands."""
+    head, *rest = re.split(SEPARATOR, token)
+    return head + "".join(part if len(part) == 3 else "." + part for part in rest)
+
+
+def facts(text: str) -> dict[str, object]:
+    """What a translation must keep: headings, numbers, tables, the files and URLs it links to, the commands."""
+    sizes, rows = [], 0
+    for line in [*text.splitlines(), ""]:
+        if line.startswith("|"):
+            rows += 1
+        elif rows:
+            sizes.append(rows)
+            rows = 0
+    targets = [target.split("#")[0].replace(".ru.md", ".md") for target in re.findall(r"\]\(([^)\s]+)\)", text)]
+    targets += re.findall(r"https?://[^\s)>\]]+", text)  # a URL outside a link too
+    commands = ("claude plugin", "codex plugin", "python3 ", "uv run")
+    return {
+        "headings": [sum(line.startswith(level) for line in text.splitlines()) for level in ("## ", "### ")],
+        "numbers": sorted(number(n) for n in re.findall(rf"\d+(?:{SEPARATOR}\d+)*", text)),
+        "tables": sizes,
+        "links": sorted(target for target in targets if target),  # an anchor is a heading, in its own language
+        "commands": sorted(line.split("  #")[0].rstrip() for line in text.splitlines() if line.startswith(commands)),
+    }
+
+
+def test_the_russian_texts_keep_the_facts_of_the_english_ones() -> None:
+    for english in ("README.md", "BENCH.md"):
+        russian = english.replace(".md", ".ru.md")
+        en, ru = (facts((ROOT / name).read_text(encoding="utf-8")) for name in (english, russian))
+        for kind in en:
+            assert en[kind] == ru[kind], (english, kind)
+
+
+def slugs(text: str) -> set[str]:
+    """The anchors GitHub gives the headings of a Markdown text."""
+    out: set[str] = set()
+    for heading in re.findall(r"^#+ (.+)$", re.sub(r"```.*?```", "", text, flags=re.DOTALL), flags=re.MULTILINE):
+        slug = candidate = re.sub(r"[^\w\- ]", "", heading.lower()).replace(" ", "-")
+        n = 0
+        while candidate in out:  # GitHub numbers a repeated heading: name, name-1, name-2
+            n += 1
+            candidate = f"{slug}-{n}"
+        out.add(candidate)
+    return out
+
+
+def test_every_link_to_a_section_finds_its_heading() -> None:
+    texts = {
+        name: (ROOT / name).read_text(encoding="utf-8")
+        for name in ("README.md", "README.ru.md", "BENCH.md", "BENCH.ru.md")
+    }
+    anchors = {name: slugs(text) for name, text in texts.items()}
+    for name, text in texts.items():
+        for target, anchor in re.findall(r"\]\(([\w./]*)#([^)\s]+)\)", text):
+            target = target.removeprefix("./")
+            if target and target not in texts:
+                assert not target.endswith(".md") or (ROOT / target).is_file(), (name, target)  # a typo in the name
+                continue  # a line in a code file, as file#L12
+            assert anchor in anchors[target or name], (name, target, anchor)
+
+
+def test_the_translation_check_catches_a_lost_number_row_link_or_command() -> None:
+    english = "## Run\n\nIt took 12.4M tokens, see [bench](BENCH.md#tiers).\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\nclaude plugin list\n"
+    russian = "## \u0417\u0430\u043f\u0443\u0441\u043a\n\n\u0423\u0448\u043b\u043e 12,4M \u0442\u043e\u043a\u0435\u043d\u043e\u0432, \u0441\u043c. [\u0437\u0430\u043c\u0435\u0440](BENCH.ru.md#\u0441\u0442\u0443\u043f\u0435\u043d\u0438).\n\n| \u0430 | \u0431 |\n|---|---|\n| 1 | 2 |\n\nclaude plugin list\n"
+    assert facts(english) == facts(russian)  # another anchor, the other language's file, a decimal comma
+    assert facts(english) != facts(russian.replace("12,4M", "124M"))  # ten times more is another number
+    for lost in (
+        "12,4M",
+        "| 1 | 2 |\n",
+        "[\u0437\u0430\u043c\u0435\u0440](BENCH.ru.md#\u0441\u0442\u0443\u043f\u0435\u043d\u0438)",
+        "claude plugin list\n",
+    ):
+        assert facts(english) != facts(russian.replace(lost, "")), lost
 
 
 # --- the hooks around a compaction ---------------------------------------------------------------
 
 HOOK = ROOT / "plugins" / "duck-factory" / "scripts" / "context_hooks.py"
+
+
+RECENT = time.time() - 3600  # an hour ago: plans left for days come back by name only
 
 
 def run_hook(cwd: Path, raw: str | None = None, **fields: object) -> subprocess.CompletedProcess[str]:
@@ -252,12 +325,29 @@ def test_after_a_compaction_the_hook_names_the_active_handoff_and_asks_to_reread
     assert "read its traps and decisions again" in flat and "handoff file's Status line to done" in flat
 
 
+def test_after_a_compaction_a_plan_left_for_days_comes_back_by_name(tmp_path: Path) -> None:
+    today = datetime.date.today()
+    recent = plan(tmp_path, "recent.md", "active", tail="Recent body\n")
+    left = plan(tmp_path, "left.md", "active", tail="Left body\n")
+    for path, days in ((recent, 3), (left, 4)):  # by the calendar, as the date the agent sees
+        # A minute past midnight: three calendar days ago is more than 72 hours ago, and still comes back in full.
+        early = datetime.datetime.combine(today - datetime.timedelta(days=days), datetime.time(0, 1)).timestamp()
+        os.utime(path, (early, early))
+    shown = run_hook(tmp_path).stdout
+    assert "Recent body" in shown and "Left body" not in shown
+    assert f"{left} (last changed {(today - datetime.timedelta(days=4)).isoformat()}, 4 days ago)" in shown
+    assert "works from it" in " ".join(shown.split())
+    asked = before_compaction(tmp_path)  # the summary is not promised a plan that will not come back
+    line = next(line for line in asked.splitlines() if str(left) in line)
+    assert "shown again in full" not in line and str(recent) not in line
+
+
 def test_after_a_compaction_plans_and_handoffs_together_stay_under_the_limit(tmp_path: Path) -> None:
     deep = tmp_path / ("a" * 80) / ("b" * 80) / ("c" * 80)  # long paths are part of the output too
     plans = [plan(deep, f"plan{n}-{'x' * 40}.md", "active", tail=str(n) * 2560) for n in range(3)]
     handoffs = [handoff(deep, f"handoff{n}-{'z' * 40}.md", "active") for n in range(3)]
     for n, path in enumerate(plans):
-        os.utime(path, (1_000_000 + n, 1_000_000 + n))
+        os.utime(path, (RECENT + n, RECENT + n))
     shown = run_hook(deep).stdout
     assert len(shown) < 10_000  # over that, Claude Code moves a hook's output to a file
     assert all(str(path) in shown for path in plans + handoffs)
@@ -360,7 +450,7 @@ def test_after_a_compaction_the_plan_that_gives_way_is_the_largest_as_measured(t
     emoji = plan(tmp_path, "emoji.md", "active", tail="\U0001f986" * 4150)
     latin = [plan(tmp_path, f"latin{n}.md", "active", tail=str(n) * 4200) for n in range(2)]
     for n, path in enumerate([*latin, emoji]):
-        os.utime(path, (1_000_000 + n, 1_000_000 + n))  # the emoji plan is the newest
+        os.utime(path, (RECENT + n, RECENT + n))  # the emoji plan is the newest
     shown = run_hook(tmp_path).stdout
     assert "0" * 4200 in shown and "1" * 4200 in shown and "\U0001f986" * 100 not in shown
     assert fits_both_hosts(shown) and str(emoji) in shown
@@ -377,7 +467,7 @@ def test_after_a_compaction_plans_that_fit_are_shown_in_full(tmp_path: Path) -> 
     # A tiny old plan does not push out a big new one when both fit.
     big = plan(tmp_path / "pair", "big.md", "active")
     tiny = plan(tmp_path / "pair", "tiny.md", None, text="Status: active\n")
-    os.utime(tiny, (1_000_000, 1_000_000))
+    os.utime(tiny, (RECENT, RECENT))
     room = 9500 - len(run_hook(tmp_path / "pair").stdout)
     body = "b" * (room - 30)
     plan(tmp_path / "pair", "big.md", "active", tail=body)
@@ -441,7 +531,7 @@ def test_before_a_compaction_the_summary_keeps_the_path_of_the_active_handoff(tm
 def test_the_hook_names_at_most_three_handoffs_the_newest_first(tmp_path: Path) -> None:
     paths = [handoff(tmp_path, f"work{n}.md", "active") for n in range(5)]
     for n, path in enumerate(paths):
-        os.utime(path, (1_000_000 + n, 1_000_000 + n))
+        os.utime(path, (RECENT + n, RECENT + n))
     shown = run_hook(tmp_path, source="startup").stdout
     assert [p.name for p in paths if str(p) in shown] == ["work2.md", "work3.md", "work4.md"]
     assert shown.index("work4.md") < shown.index("work3.md")
@@ -747,19 +837,25 @@ def test_second_round_fixes_in_the_skills() -> None:
 
 def test_codex_grill_asks_by_mode() -> None:
     rows = tool_rows(CODEX / "grill" / "SKILL.md")
-    assert "Plan mode" in rows["`request_user_input`"] and "not for these questions" not in rows["`request_user_input`"]
-    assert "Plan mode" in rows["`request_user_input_async`"]
+    assert "in Plan mode, the only mode" in rows["`request_user_input`"]
+    assert "not for these questions" not in rows["`request_user_input`"]
+    # Outside Plan mode Codex 0.172 refuses it, or with a feature on tells the model not to wait for the answers.
+    assert "default_mode_request_user_input" not in rows["`request_user_input`"]
+    assert "outside Plan mode" in rows["`request_user_input_async`"]
+    assert "outside Plan mode" in rows["`send_message_to_user_async`"]
     text = words(CODEX / "grill" / "SKILL.md")
     assert "end the turn with the open questions written out in your final message" in text
+    hint = between(text, "**How to ask.**", "| Tool |")  # how the user gets a dialog that waits
+    assert "only in Plan mode (Shift+Tab switches to it)" in hint and "a dialog that does not wait" in hint
     assert "in Plan mode, give the plan or the record in your final answer" in text
 
 
-def test_readmes_show_the_final_row_and_the_anchor_links() -> None:
+def test_readmes_show_the_final_row_and_the_bench_the_anchor_links() -> None:
     final_ru = "\u0444\u0438\u043d\u0430\u043b\u044c\u043d\u0430\u044f"  # the Russian name of the tier
     for readme, final in (("README.md", "| final |"), ("README.ru.md", "| " + final_ru + " |")):
-        text = (ROOT / readme).read_text(encoding="utf-8")
-        assert final in text, readme
-        assert "#L" in text, readme  # the bench reads file#Lline links too
+        assert final in (ROOT / readme).read_text(encoding="utf-8"), readme
+    for bench in ("BENCH.md", "BENCH.ru.md"):  # the measurements, the bench in evals/ among them, moved there
+        assert "#L" in (ROOT / bench).read_text(encoding="utf-8"), bench  # the bench reads file#Lline links too
 
 
 def test_reviewers_read_the_project_rules_and_tests_fail_for_the_right_reason() -> None:
@@ -911,8 +1007,8 @@ def test_simplification_joins_a_fresh_list_with_the_agents_own_pass() -> None:
             "Do it yourself: do not start a skill or other agents" in step and "Read the project's rules first" in step
         )
     assert "without a fresh look" not in words(ROOT / "CHANGELOG.md")  # the bench's 14 was a fresh Claude agent
-    simplification = between(
-        words(ROOT / "README.md"), "the work ends once with a simplification", "changed behaviour."
+    simplification = between(  # up to the link to the measurement, which lives in BENCH.md
+        words(ROOT / "README.md"), "the work ends once with a simplification", "(BENCH.md#simplification)"
     )
     assert (
         "instead of Codex" not in simplification and "In Codex the list comes from a fresh sub-agent" in simplification
@@ -1012,6 +1108,47 @@ def test_the_changelog_has_the_version_of_both_plugins_in_both_languages() -> No
     market = json.loads((ROOT / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8"))
     english, russian = ((ROOT / n).read_text(encoding="utf-8") for n in ("CHANGELOG.md", "CHANGELOG.ru.md"))
     changelog_check(english, russian, versions, market["plugins"][0]["version"])
+
+
+def test_review_counts_no_asset_as_code() -> None:
+    for skills in (CLAUDE, CODEX):
+        text = words(skills / "review" / "SKILL.md")
+        lines = between(text, "- **Code lines**", "- **Text data the code reads is code.**")
+        for kind in ("images (`*.svg` too)", "fonts", "audio and video", "archives", "PDF"):
+            assert kind in lines, (skills, kind)
+        assert "An asset is not code even when the program loads it" in lines, skills
+        # A binary that runs is code: a `.wasm`, or a script git shows as binary because it is saved in UTF-16.
+        assert "Any other binary file counts as a code file" in lines and "UTF-16" in lines, skills
+        assert "`git diff --no-index --numstat /dev/null <file>`" in lines, skills  # a new file is not in `git diff`
+        # A binary code file alone has no lines, and must not stop the review at "none".
+        assert "| none | no code file changed |" in text, skills
+
+
+def test_handoff_asks_about_a_named_file_that_is_missing_and_keeps_its_lists_short() -> None:
+    for skills in (CLAUDE, CODEX):
+        text = words(skills / "handoff" / "SKILL.md")
+        assert "If the named file does not exist, stop and ask whether the path is right" in text, skills
+        assert "naming the active files in `.tmp/handoff/`" in text, skills
+        for heading in ("Traps:", "Waiting on the user:"):
+            assert "up to five" in between(text, heading, ">"), (skills, heading)
+
+
+def test_the_codex_plugin_is_where_its_catalogue_says_and_carries_what_its_manifest_names() -> None:
+    # `claude plugin validate` passes on the Codex folder without finding its manifest: check it here.
+    market = json.loads((ROOT / ".agents" / "plugins" / "marketplace.json").read_text(encoding="utf-8"))
+    (entry,) = market["plugins"]
+    root = ROOT / entry["source"]["path"]
+    manifest = json.loads((root / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8"))
+    assert manifest["name"] == entry["name"] == "duck-factory"
+    assert (root / manifest["skills"]).is_dir() and (root / "hooks" / "hooks.json").is_file()
+    for skill in ("grill", "review", "handoff"):
+        assert (root / manifest["skills"] / skill / "SKILL.md").is_file(), skill
+
+
+def test_the_project_file_carries_the_version_of_the_plugins() -> None:
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
+    for manifest in (CLAUDE.parent / ".claude-plugin" / "plugin.json", CODEX.parent / ".codex-plugin" / "plugin.json"):
+        assert json.loads(manifest.read_text(encoding="utf-8"))["version"] == project, manifest
 
 
 def test_the_changelog_check_takes_a_release_of_one_plugin_and_rejects_gaps() -> None:

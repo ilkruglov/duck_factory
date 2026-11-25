@@ -23,13 +23,17 @@ git ls-files -o --exclude-standard      # new files; count lines of the ones tha
 ```
 
 - **Code lines**: added plus deleted, without tests (`tests/`, `test_*`, `*_test.*`, `*.spec.*`), docs (`*.md`,
-  `docs/`) and data or config files (`*.json`, `*.yaml`, `*.toml`, `*.csv`, `*.lock`). Take the count
-  from the `-w` run, so that wrapping a block in an `if` is two lines and not the whole block. A file that shows
-  changes in the plain run and none with `-w` is counted from the plain run: where indentation is syntax (Python,
-  YAML) a shifted line changes behaviour, and such a change must not come out as "no code lines".
-- **Data the code reads is code.** A data or config file that the project's code, tests or checks load - a table
-  the pipeline reads, a fixture, a schema, a prompt - counts line for line, and its bugs are bugs: a wrong value
-  there breaks the program like a wrong line of code. `git grep -n <file name>` shows whether anything reads it.
+  `docs/`) and data or config files (`*.json`, `*.yaml`, `*.toml`, `*.csv`, `*.lock`), and without assets: images
+  (`*.svg` too), fonts, audio and video, archives, PDF. An asset is not code even when the program loads it. Any
+  other binary file counts as a code file, with no lines: a `.wasm`, or a script git shows as binary because it is
+  saved in UTF-16 (`-` in `--numstat`; for a new file, in `git diff --no-index --numstat /dev/null <file>`). Take
+  the count from the `-w` run, so that wrapping a block in an `if` is two lines and not the whole block. A file that
+  shows changes in the plain run and none with `-w` is counted from the plain run: where indentation is syntax
+  (Python, YAML) a shifted line changes behaviour, and such a change must not come out as "no code lines".
+- **Text data the code reads is code.** A text data or config file that the project's code, tests or checks load - a
+  table the pipeline reads, a fixture, a schema, a prompt - counts line for line, and its bugs are bugs: a wrong
+  value there breaks the program like a wrong line of code. `git grep -n <file name>` shows whether anything reads
+  it.
 - **Files**: code files changed.
 - **Call sites**: for each function, method or class whose behaviour or signature changed, the places that use
   it (`git grep -nw <name>`), summed. Count uses in code only, not in tests and not the definition itself. New
@@ -59,7 +63,7 @@ steps meet shows only when both are in view.
 
 | Tier | When | Review pass | Plan check |
 |---|---|---|---|
-| none | no code lines at all | - | - |
+| none | no code file changed | - | - |
 | light | up to 50 code lines, 1 file, up to 5 call sites, no one-way door | general | no |
 | normal | everything else | general | yes |
 | enhanced | a one-way door, or a critical path, or over 10 files, or over 20 call sites, or the user asked | adversarial, instead of general | yes |

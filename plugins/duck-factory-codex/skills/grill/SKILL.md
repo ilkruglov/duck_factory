@@ -81,7 +81,9 @@ you haven't heard yet waits for a later round. Ask the frontier in rounds, the m
 
 **How to ask.** These questions are required, never optional: the interview exists because the decisions are the
 user's. Elapsed time is not an answer, no default is taken because nobody replied, and no work that depends on an
-open question is done. Codex gives different question tools in different modes; use the row for this session:
+open question is done. Outside Plan mode, say once, as the interview starts, that only in Plan mode (Shift+Tab
+switches to it) do the questions come as a dialog that waits for the answers; otherwise they come in text or in a
+dialog that does not wait. Codex gives different question tools in different modes; use the row for this session:
 
 | Tool | When | Per call, and how the answers arrive |
 |---|---|---|

@@ -6,7 +6,8 @@ accepted the result or the work is dropped.
 - PreCompact: what the script prints becomes instructions for the summary. It asks to keep what real sessions
   went back to the transcript for after a compaction, and names the active plans.
 - SessionStart after a compaction: what it prints is added to the context. It prints the active plans
-  themselves, because the compaction is what loses them.
+  themselves, because the compaction is what loses them; a plan not changed for more than three days is likely left,
+  and is only named.
 - Any other SessionStart (a new session, a resume): it only names the active plans. A new session may be about
   something else, and a resumed one still has its history: printing the plan on every resume would add a copy.
 
@@ -31,6 +32,7 @@ from pathlib import Path
 STATUS = re.compile(r"^(?:Status:|\*\*Status:\*\*|__Status:__)\s*(?P<value>[A-Za-z]+)(?![\w-])", re.IGNORECASE)
 HEAD_BYTES = 2000  # the title and the Status line under it
 MAX_FILES = 3  # plans or handoff files named or shown at once
+LEFT_AFTER = 3  # days: a plan not changed for longer is likely left, and comes back after a compaction by name only
 # Claude Code moves hook output over 10,000 UTF-16 units to a file; Codex counts 4 bytes of UTF-8 as a token and
 # moves output over the hook's limit (5000) to a file. Under 9500 units and 19,000 bytes it is under both.
 LIMIT = 9500
@@ -142,10 +144,15 @@ def in_full(plans: list[Found], tail: str) -> str:
         bodies[largest], whole[largest] = TOO_LONG, False
 
 
-def when(changed: float) -> str:
+def age(changed: float) -> tuple[datetime.date, int]:
+    """The day of the last change and how many calendar days ago it was."""
     today = datetime.date.today()
     day = min(datetime.date.fromtimestamp(changed), today)  # a clock ahead of this one is not the future
-    days = (today - day).days
+    return day, (today - day).days
+
+
+def when(changed: float) -> str:
+    day, days = age(changed)
     return f"last changed {day.isoformat()}, " + (
         "today" if days == 0 else "yesterday" if days == 1 else f"{days} days ago"
     )
@@ -155,6 +162,13 @@ def by_name(plans: list[Found]) -> str:
     out = ["This project has an active plan written by the grill skill; it is not loaded here:"]
     out += [f"- {path} ({when(changed)})" for path, changed in plans]
     out.append(f"{ON_REQUEST} {CLOSING}")
+    return "\n".join(out) + "\n"
+
+
+def left_by_name(plans: list[Found]) -> str:
+    out = [f"Active plan of this project not changed for more than {LEFT_AFTER} days, so not shown here:"]
+    out += [f"- {path} ({when(changed)})" for path, changed in plans]
+    out.append(f"If this session works from it, read it before going on. {CLOSING}")
     return "\n".join(out) + "\n"
 
 
@@ -175,16 +189,32 @@ def handoffs_by_name(handoffs: list[Found], after_compaction: bool) -> str:
 
 def for_summary(plans: list[Found], handoffs: list[Found]) -> str:
     out = [SUMMARY]
-    if plans:
-        paths = ", ".join(str(path) for path, _ in plans)
+    recent, left = split(plans)
+    if recent:
+        paths = ", ".join(str(path) for path, _ in recent)
         out.append(
             f"- Active plan: {paths}. Name the path and do not copy the plan: it is shown again in full after the"
             " compaction."
+        )
+    if left:
+        paths = ", ".join(str(path) for path, _ in left)
+        out.append(
+            f"- Active plan not changed for more than {LEFT_AFTER} days: {paths}. Name the path if this session works"
+            " from it."
         )
     if handoffs:
         paths = ", ".join(str(path) for path, _ in handoffs)
         out.append(f"- Active handoff file: {paths}. Name the path if this session works from it.")
     return "\n".join(out) + "\n"
+
+
+def split(plans: list[Found]) -> tuple[list[Found], list[Found]]:
+    """The plans changed lately, and those left for more than LEFT_AFTER days."""
+    recent: list[Found] = []
+    left: list[Found] = []
+    for plan in plans:
+        (recent if age(plan[1])[1] <= LEFT_AFTER else left).append(plan)
+    return recent, left
 
 
 def emit(text: str) -> None:
@@ -208,10 +238,12 @@ def main() -> None:
         after_compaction = source == "compact"
         named = handoffs_by_name(handoffs, after_compaction) if handoffs else ""
         # Only a compaction loses the plan; a resumed session still has it, a new one may not need it.
-        if plans and after_compaction:
-            emit(in_full(plans, named))
-        else:
+        if not after_compaction:
             emit("\n".join(part for part in (by_name(plans) if plans else "", named) if part))
+            return
+        recent, left = split(plans)
+        tail = "\n".join(part for part in (left_by_name(left) if left else "", named) if part)
+        emit(in_full(recent, tail) if recent else tail)
     except Exception:  # noqa: BLE001 - a reminder must never break a compaction or the start of a session
         return
 

@@ -1,0 +1,19 @@
+[project]
+name = "duck-factory"
+version = "0.5.0"
+description = "Tests and benches of the duck-factory plugins for Claude Code and Codex"
+requires-python = ">=3.12"
+dependencies = []
+
+[dependency-groups]
+# Pinned, so that a run here and a run in CI check the same thing.
+dev = ["pytest==9.2.0", "ruff==0.17.6"]
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+line-length = 120
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

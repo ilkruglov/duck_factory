@@ -1,6 +1,6 @@
 {
   "name": "duck-factory",
-  "version": "0.4.4",
+  "version": "0.5.0",
   "description": "Three skills for a development pipeline in Codex: grill (clarify and plan before code), review (one code review with measured depth, by sub-agents), handoff (continue the work in a fresh session).",
   "author": {
     "name": "ilkruglov",
